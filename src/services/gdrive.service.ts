@@ -4,19 +4,25 @@ import { format } from 'date-fns';
 
 const MAIN_FOLDER_ID = process.env.GDRIVE_MAIN_FOLDER_ID || '1LcuiL-H8ibHkMAID6mhJtfCk89bTxsEa';
 
-// Request full drive scope for service accounts interacting with shared folders
-const auth = new google.auth.GoogleAuth({
-  keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS || './google-credentials.json',
-  scopes: ['https://www.googleapis.com/auth/drive'],
-});
+let _drive: ReturnType<typeof google.drive> | null = null;
 
-const drive = google.drive({ version: 'v3', auth });
+function getDrive() {
+  if (!_drive) {
+    const auth = new google.auth.GoogleAuth({
+      keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS || './google-credentials.json',
+      scopes: ['https://www.googleapis.com/auth/drive'],
+    });
+    _drive = google.drive({ version: 'v3', auth });
+  }
+  return _drive;
+}
+
 
 async function getOrCreateDailyFolder(): Promise<string> {
   const dateFolderName = format(new Date(), 'yyyy-MM-dd');
 
   try {
-    const response = await drive.files.list({
+    const response = await getDrive().files.list({
       q: `mimeType='application/vnd.google-apps.folder' and name='${dateFolderName}' and '${MAIN_FOLDER_ID}' in parents and trashed=false`,
       fields: 'files(id, name)',
       spaces: 'drive',
@@ -34,7 +40,7 @@ async function getOrCreateDailyFolder(): Promise<string> {
       parents: [MAIN_FOLDER_ID],
     };
 
-    const folder = await drive.files.create({
+    const folder = await getDrive().files.create({
       requestBody: fileMetadata,
       fields: 'id',
       supportsAllDrives: true
@@ -75,7 +81,7 @@ export async function uploadToGoogleDrive(
       body: fileStream,
     };
 
-    const file = await drive.files.create({
+    const file = await getDrive().files.create({
       requestBody: fileMetadata,
       media: media,
       fields: 'id, webViewLink',
