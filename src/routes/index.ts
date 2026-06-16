@@ -1,0 +1,38 @@
+import { Router } from 'express';
+import authRoutes from './auth.routes';
+import attendanceRoutes from './attendance.routes';
+import reportRoutes from './report.routes';
+import leaveRoutes from './leave.routes';
+import dashboardRoutes from './dashboard.routes';
+import targetRoutes from './target.routes';
+import productionRoutes from './production.routes';
+import purchasingRoutes from './purchasing.routes';
+import cashierRoutes from './cashier.routes';
+import warehouseRoutes from './warehouse.routes';
+import chatRoutes from './chat.routes';
+import erpRoutes from './erp.routes';
+import exportRoutes from './export.routes';
+import uploadRoutes from './upload.routes';
+import userRoutes from './user.routes';
+import notificationRoutes from './notification.routes';
+
+const router = Router();
+
+router.use('/auth', authRoutes);
+router.use('/attendances', attendanceRoutes);
+router.use('/daily-reports', reportRoutes);
+router.use('/leaves', leaveRoutes);
+router.use('/dashboard', dashboardRoutes);
+router.use('/targets', targetRoutes);
+router.use('/production', productionRoutes);
+router.use('/purchasing', purchasingRoutes);
+router.use('/cashier', cashierRoutes);
+router.use('/warehouse', warehouseRoutes);
+router.use('/chat', chatRoutes);
+router.use('/erp', erpRoutes);
+router.use('/export', exportRoutes);
+router.use('/daily-uploads', uploadRoutes);
+router.use('/users', userRoutes);
+router.use('/notifications', notificationRoutes);
+
+export default router;
