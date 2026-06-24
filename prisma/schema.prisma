@@ -119,6 +119,9 @@ model User {
   // Audits
   auditLogs AuditLog[]
 
+  // Location
+  locationLogs LocationLog[]
+
   // Paklaring (Work Certificate)
   paklaringIssued   Paklaring[] @relation("PaklaringIssuer")
   paklaringReceived Paklaring[] @relation("PaklaringEmployee")
@@ -727,6 +730,8 @@ model LocationLog {
   address   String?
   activity  String // CHECK_IN, CHECK_OUT, FIELD_VISIT, etc
   notes     String?
+
+  user      User    @relation(fields: [userId], references: [id])
 
   createdAt DateTime @default(now())
 
