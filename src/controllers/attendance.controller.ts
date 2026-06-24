@@ -4,6 +4,24 @@ import { successResponse, errorResponse } from '../utils/response';
 import { writeAuditLog } from '../utils/audit';
 import { AttendanceStatus } from '@prisma/client';
 
+// Helper: ambil tanggal "hari ini" dalam zona waktu WIB (UTC+7)
+// Server Render berjalan di UTC, jadi kita harus offset manual
+const getTodayWIB = (): Date => {
+  const now = new Date();
+  const wibOffset = 7 * 60 * 60 * 1000;
+  const wibNow = new Date(now.getTime() + wibOffset);
+  const today = new Date(Date.UTC(wibNow.getUTCFullYear(), wibNow.getUTCMonth(), wibNow.getUTCDate()));
+  return today;
+};
+
+// Cek apakah jam >= 09:00 WIB
+const isLateWIB = (): boolean => {
+  const now = new Date();
+  const wibOffset = 7 * 60 * 60 * 1000;
+  const wibNow = new Date(now.getTime() + wibOffset);
+  return wibNow.getUTCHours() >= 9;
+};
+
 export const checkIn = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
@@ -13,8 +31,7 @@ export const checkIn = async (req: Request, res: Response) => {
       return errorResponse(res, 'Lokasi (GPS) wajib diaktifkan untuk melakukan absensi', null, 400);
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = getTodayWIB();
 
     // Cek apakah sudah absen hari ini
     const existingAttendance = await prisma.attendance.findUnique({
@@ -31,15 +48,25 @@ export const checkIn = async (req: Request, res: Response) => {
     }
 
     const now = new Date();
-    const isLate = now.getHours() >= 9; // Misal masuk jam 9
 
     const attendance = await prisma.attendance.create({
       data: {
         userId,
         date: today,
         checkIn: now,
-        status: isLate ? AttendanceStatus.TELAT : AttendanceStatus.HADIR,
+        status: isLateWIB() ? AttendanceStatus.TELAT : AttendanceStatus.HADIR,
       },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: { select: { name: true } },
+            division: { select: { name: true } }
+          }
+        }
+      }
     });
 
     // Save Location Log
@@ -49,7 +76,7 @@ export const checkIn = async (req: Request, res: Response) => {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         activity: 'CHECK_IN',
-        notes: `Check-in time: ${now.toLocaleTimeString()}`,
+        notes: `Check-in pukul ${now.toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })}`,
       }
     });
 
@@ -70,8 +97,7 @@ export const checkOut = async (req: Request, res: Response) => {
       return errorResponse(res, 'Lokasi (GPS) wajib diaktifkan untuk melakukan absensi', null, 400);
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = getTodayWIB();
 
     const attendance = await prisma.attendance.findUnique({
       where: {
@@ -93,7 +119,6 @@ export const checkOut = async (req: Request, res: Response) => {
     const now = new Date();
     const checkInTime = new Date(attendance.checkIn!);
     
-    // Hitung total jam (dalam desimal)
     const diffMs = now.getTime() - checkInTime.getTime();
     const totalHours = diffMs / (1000 * 60 * 60);
 
@@ -103,6 +128,17 @@ export const checkOut = async (req: Request, res: Response) => {
         checkOut: now,
         totalHours: Number(totalHours.toFixed(2)),
       },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: { select: { name: true } },
+            division: { select: { name: true } }
+          }
+        }
+      }
     });
 
     // Save Location Log
@@ -112,7 +148,7 @@ export const checkOut = async (req: Request, res: Response) => {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         activity: 'CHECK_OUT',
-        notes: `Check-out time: ${now.toLocaleTimeString()}`,
+        notes: `Check-out pukul ${now.toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })}`,
       }
     });
 
@@ -131,7 +167,18 @@ export const getMyAttendance = async (req: Request, res: Response) => {
     const attendances = await prisma.attendance.findMany({
       where: { userId },
       orderBy: { date: 'desc' },
-      take: 30, // 30 hari terakhir
+      take: 30,
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: { select: { name: true } },
+            division: { select: { name: true } }
+          }
+        }
+      }
     });
 
     return successResponse(res, attendances, 'Data absensi berhasil diambil');
@@ -140,9 +187,36 @@ export const getMyAttendance = async (req: Request, res: Response) => {
   }
 };
 
+// Admin/Manager/CEO/Owner: lihat semua absensi hari ini
+export const getAllAttendanceToday = async (req: Request, res: Response) => {
+  try {
+    const today = getTodayWIB();
+    
+    const attendances = await prisma.attendance.findMany({
+      where: { date: today },
+      orderBy: { checkIn: 'asc' },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: { select: { name: true } },
+            division: { select: { name: true } }
+          }
+        }
+      }
+    });
+
+    return successResponse(res, attendances, 'Data absensi hari ini berhasil diambil');
+  } catch (error) {
+    console.error('Get all attendance today error:', error);
+    return errorResponse(res, 'Terjadi kesalahan internal', null, 500);
+  }
+};
+
 export const getLocationLogs = async (req: Request, res: Response) => {
   try {
-    // Only fetch for today or maybe limit to 100 recent
     const logs = await prisma.locationLog.findMany({
       include: {
         user: {
