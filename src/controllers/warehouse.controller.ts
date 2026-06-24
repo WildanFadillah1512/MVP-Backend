@@ -60,3 +60,25 @@ export const getMovements = async (req: Request, res: Response) => {
     return errorResponse(res, 'Gagal mengambil riwayat gudang', null, 500);
   }
 };
+
+export const getLowStockRecommendations = async (req: Request, res: Response) => {
+  try {
+    const lowStockItems = await prisma.warehouseItem.findMany({
+      where: {
+        currentStock: { lte: prisma.warehouseItem.fields.minStock }
+      },
+      orderBy: { currentStock: 'asc' }
+    });
+    // Filter in-memory since Prisma can't compare two columns directly without raw SQL
+    const all = await prisma.warehouseItem.findMany({ orderBy: { currentStock: 'asc' } });
+    const filtered = all.filter(i => i.currentStock <= i.minStock);
+    const recommendations = filtered.map(item => ({
+      ...item,
+      recommendedQty: Math.max(item.minStock * 2 - item.currentStock, item.minStock),
+      priority: item.currentStock === 0 ? 'HIGH' : item.currentStock <= item.minStock / 2 ? 'HIGH' : 'MEDIUM'
+    }));
+    return successResponse(res, recommendations, 'Rekomendasi belanja berhasil diambil');
+  } catch (error) {
+    return errorResponse(res, 'Gagal mengambil rekomendasi', null, 500);
+  }
+};

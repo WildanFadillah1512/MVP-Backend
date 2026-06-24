@@ -7,7 +7,7 @@ import { requireErpUnlock } from '../middlewares/erp.middleware';
 const router = Router();
 
 router.use(authenticate);
-router.use(authorizeRole(['CEO', 'ADMIN']));
+router.use(authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN']));
 
 router.get('/crm/customers', requireErpUnlock('CRM'), getCustomers);
 router.get('/finance/ledger', requireErpUnlock('FINANCE'), getFinanceLedger);

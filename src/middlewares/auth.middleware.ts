@@ -37,8 +37,13 @@ export const authorizeDivision = (divisions: string[]) => {
     const userDivision = (req as any).user.division;
     const userRole = (req as any).user.role;
     
-    // CEO and Admin can bypass division check
-    if (userRole === 'CEO' || userRole === 'ADMIN') {
+    // OWNER, CEO, and Admin can bypass division check entirely
+    if (['OWNER', 'CEO', 'ADMIN'].includes(userRole)) {
+      return next();
+    }
+    
+    // GM can bypass everything EXCEPT KASIR (Keuangan)
+    if (userRole === 'GM' && !divisions.includes('KASIR')) {
       return next();
     }
     

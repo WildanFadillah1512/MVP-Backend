@@ -9,7 +9,7 @@ router.use(authenticate);
 // Needs (Everyone can see/request, but Purchasing/Manager/CEO processes it)
 router.get('/needs', getNeeds);
 router.post('/needs', createNeed);
-router.patch('/needs/:id/status', updateNeedStatus);
+router.patch('/needs/:id/status', authorizeDivision(['PURCHASING']), updateNeedStatus);
 
 // Purchases (Only Purchasing, Admin, CEO can write)
 router.get('/history', getPurchases);

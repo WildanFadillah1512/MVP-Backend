@@ -126,3 +126,21 @@ export const getUserOptions = async (req: Request, res: Response) => {
     return errorResponse(res, 'Gagal mengambil options', null, 500);
   }
 };
+
+export const updateProfile = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    const { photoUrl, bio, phone } = req.body;
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { photoUrl, bio, phone },
+      include: { role: true, division: true }
+    });
+
+    const { password, ...sanitized } = user;
+    return successResponse(res, sanitized, 'Profil berhasil diperbarui');
+  } catch (error) {
+    return errorResponse(res, 'Gagal memperbarui profil', null, 500);
+  }
+};

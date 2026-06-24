@@ -11,7 +11,9 @@ datasource db {
 // ENUMS
 // -----------------------------------------
 enum RoleName {
+  OWNER
   CEO
+  GM
   ADMIN
   MANAGER
   LEADER
@@ -80,16 +82,21 @@ model Division {
 }
 
 model User {
-  id         String   @id @default(uuid())
-  email      String   @unique
+  id         String  @id @default(uuid())
+  email      String  @unique
   password   String
   name       String
   roleId     String
   divisionId String
-  isActive   Boolean  @default(true)
+  isActive   Boolean @default(true)
 
-  role       Role     @relation(fields: [roleId], references: [id])
-  division   Division @relation(fields: [divisionId], references: [id])
+  // New fields for profile
+  photoUrl String? // Profile photo
+  bio      String? // Bio/description
+  phone    String? // Phone number
+
+  role     Role     @relation(fields: [roleId], references: [id])
+  division Division @relation(fields: [divisionId], references: [id])
 
   // Hierarchy
   supervisorId String?
@@ -97,19 +104,24 @@ model User {
   subordinates User[]  @relation("UserSupervisor")
 
   // Employee Modules
-  attendances      Attendance[]
-  leaveBalances    LeaveBalance?
-  leaveRequests    LeaveRequest[]
-  dailyReports     DailyReport[]
-  dailyUploads     DailyUpload[]
+  attendances       Attendance[]
+  leaveBalances     LeaveBalance?
+  leaveRequests     LeaveRequest[]
+  dailyReports      DailyReport[]
+  dailyUploads      DailyUpload[]
   targetAssignments TargetAssignment[]
+  overtimeRecords   OvertimeRecord[]
 
   // Chat
-  chatMemberships  ChatGroupMember[]
-  messagesSent     ChatMessage[]
+  chatMemberships ChatGroupMember[]
+  messagesSent    ChatMessage[]
 
   // Audits
-  auditLogs        AuditLog[]
+  auditLogs AuditLog[]
+
+  // Paklaring (Work Certificate)
+  paklaringIssued   Paklaring[] @relation("PaklaringIssuer")
+  paklaringReceived Paklaring[] @relation("PaklaringEmployee")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -137,14 +149,14 @@ model Attendance {
 }
 
 model LeaveBalance {
-  id          String @id @default(uuid())
-  userId      String @unique
-  user        User   @relation(fields: [userId], references: [id])
-  totalQuota  Int    @default(12)
-  usedQuota   Int    @default(0)
+  id         String @id @default(uuid())
+  userId     String @unique
+  user       User   @relation(fields: [userId], references: [id])
+  totalQuota Int    @default(12)
+  usedQuota  Int    @default(0)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model LeaveRequest {
@@ -157,8 +169,8 @@ model LeaveRequest {
   status     LeaveStatus @default(PENDING)
   approverId String?
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // -----------------------------------------
@@ -176,59 +188,59 @@ model DailyReport {
   notes       String?
   status      ReportStatus @default(DRAFT)
 
-  uploads     DailyUpload[]
+  uploads DailyUpload[]
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([userId, date])
 }
 
 model DailyUpload {
-  id            String       @id @default(uuid())
-  userId        String
-  user          User         @relation(fields: [userId], references: [id])
-  reportId      String?
-  report        DailyReport? @relation(fields: [reportId], references: [id])
-  fileUrl       String
-  fileName      String
-  fileType      String
-  status        LeaveStatus  @default(PENDING) // Reusing enum for simplicity (Pending/Approve/Reject)
-  reviewerId    String?
-  rejectReason  String?
+  id           String       @id @default(uuid())
+  userId       String
+  user         User         @relation(fields: [userId], references: [id])
+  reportId     String?
+  report       DailyReport? @relation(fields: [reportId], references: [id])
+  fileUrl      String
+  fileName     String
+  fileType     String
+  status       LeaveStatus  @default(PENDING) // Reusing enum for simplicity (Pending/Approve/Reject)
+  reviewerId   String?
+  rejectReason String?
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model WorkTarget {
-  id          String   @id @default(uuid())
+  id          String       @id @default(uuid())
   title       String
   description String?
   period      TargetPeriod
   targetValue Float
-  unit        String   // pcs, orders, rupiah, etc.
+  unit        String // pcs, orders, rupiah, etc.
 
   assignments TargetAssignment[]
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model TargetAssignment {
-  id           String     @id @default(uuid())
+  id           String @id @default(uuid())
   targetId     String
   userId       String
   assignedById String
 
-  target       WorkTarget @relation(fields: [targetId], references: [id])
-  user         User       @relation(fields: [userId], references: [id])
+  target WorkTarget @relation(fields: [targetId], references: [id])
+  user   User       @relation(fields: [userId], references: [id])
 
-  currentValue Float      @default(0)
-  isCompleted  Boolean    @default(false)
+  currentValue Float   @default(0)
+  isCompleted  Boolean @default(false)
 
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // -----------------------------------------
@@ -236,17 +248,19 @@ model TargetAssignment {
 // -----------------------------------------
 
 model Product {
-  id            String   @id @default(uuid())
-  code          String   @unique
-  name          String
-  category      String
-  basePrice     Float    @default(0) // Phase 2 HPP Prep
+  id        String @id @default(uuid())
+  code      String @unique
+  name      String
+  category  String
+  basePrice Float  @default(0) // Phase 2 HPP Prep
 
   productionRecords ProductionRecord[]
+  productionTargets ProductionTarget[]
+  productionRejects ProductionReject[]
   stockMovements    ProductStockMovement[]
 
   // Phase 2 ERP: BOM Link
-  recipes       ErpProductRecipe[]
+  recipes ErpProductRecipe[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -258,7 +272,10 @@ model ProductionRecord {
   product   Product  @relation(fields: [productId], references: [id])
   date      DateTime @db.Date
   quantity  Int
+  rejectQty Int      @default(0)
   notes     String?
+
+  rejects ProductionReject[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -270,10 +287,29 @@ model ProductStockMovement {
   product   Product           @relation(fields: [productId], references: [id])
   type      StockMovementType
   quantity  Int
-  reference String?           // Order ID or Production ID
+  reference String? // Order ID or Production ID
   notes     String?
 
   createdAt DateTime @default(now())
+}
+
+// Target Produksi Bulanan (NEW - PHASE 1)
+model ProductionTarget {
+  id          String   @id @default(uuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+  targetMonth DateTime @db.Date // YYYY-MM-01
+  targetQty   Int
+  actualQty   Int      @default(0)
+  createdById String
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([productId, targetMonth])
+  @@index([targetMonth])
+  @@index([createdById])
 }
 
 // -----------------------------------------
@@ -281,29 +317,29 @@ model ProductStockMovement {
 // -----------------------------------------
 
 model ShoppingNeed {
-  id          String   @id @default(uuid())
-  itemName    String
-  quantity    Int
-  priority    String   // HIGH, MEDIUM, LOW
-  status      String   // NEEDED, ORDERED, PURCHASED
-  notes       String?
+  id       String  @id @default(uuid())
+  itemName String
+  quantity Int
+  priority String // HIGH, MEDIUM, LOW
+  status   String // NEEDED, ORDERED, PURCHASED
+  notes    String?
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model PurchaseNote {
-  id          String   @id @default(uuid())
-  itemName    String
-  quantity    Int
-  unitPrice   Float
-  totalPrice  Float
-  supplier    String?
-  receiptUrl  String?
-  date        DateTime @default(now())
+  id         String   @id @default(uuid())
+  itemName   String
+  quantity   Int
+  unitPrice  Float
+  totalPrice Float
+  supplier   String?
+  receiptUrl String?
+  date       DateTime @default(now())
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // -----------------------------------------
@@ -311,15 +347,15 @@ model PurchaseNote {
 // -----------------------------------------
 
 model Branch {
-  id          String   @id @default(uuid())
-  code        String   @unique
-  name        String
-  address     String?
+  id      String  @id @default(uuid())
+  code    String  @unique
+  name    String
+  address String?
 
   cashierReports CashierReport[]
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model CashierReport {
@@ -334,8 +370,8 @@ model CashierReport {
   netTotal      Float    @default(0)
   notes         String?
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // -----------------------------------------
@@ -343,31 +379,31 @@ model CashierReport {
 // -----------------------------------------
 
 model WarehouseItem {
-  id          String   @id @default(uuid())
-  code        String   @unique
-  name        String
-  category    String
-  minStock    Int      @default(10)
-  currentStock Int     @default(0)
-  unit        String
+  id           String @id @default(uuid())
+  code         String @unique
+  name         String
+  category     String
+  minStock     Int    @default(10)
+  currentStock Int    @default(0)
+  unit         String
 
-  movements   WarehouseMovement[]
-  recipes     ErpProductRecipe[]
+  movements WarehouseMovement[]
+  recipes   ErpProductRecipe[]
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model WarehouseMovement {
-  id              String        @id @default(uuid())
+  id              String            @id @default(uuid())
   warehouseItemId String
-  item            WarehouseItem @relation(fields: [warehouseItemId], references: [id])
+  item            WarehouseItem     @relation(fields: [warehouseItemId], references: [id])
   type            StockMovementType
   quantity        Int
   notes           String?
-  date            DateTime      @default(now())
+  date            DateTime          @default(now())
 
-  createdAt       DateTime      @default(now())
+  createdAt DateTime @default(now())
 }
 
 // -----------------------------------------
@@ -375,38 +411,38 @@ model WarehouseMovement {
 // -----------------------------------------
 
 model ChatGroup {
-  id          String   @id @default(uuid())
+  id          String  @id @default(uuid())
   name        String
   description String?
 
-  members     ChatGroupMember[]
-  messages    ChatMessage[]
+  members  ChatGroupMember[]
+  messages ChatMessage[]
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 }
 
 model ChatGroupMember {
-  id          String    @id @default(uuid())
-  groupId     String
-  group       ChatGroup @relation(fields: [groupId], references: [id])
-  userId      String
-  user        User      @relation(fields: [userId], references: [id])
+  id      String    @id @default(uuid())
+  groupId String
+  group   ChatGroup @relation(fields: [groupId], references: [id])
+  userId  String
+  user    User      @relation(fields: [userId], references: [id])
 
-  joinedAt    DateTime  @default(now())
+  joinedAt DateTime @default(now())
 
   @@unique([groupId, userId])
 }
 
 model ChatMessage {
-  id          String    @id @default(uuid())
-  groupId     String
-  group       ChatGroup @relation(fields: [groupId], references: [id])
-  senderId    String
-  sender      User      @relation(fields: [senderId], references: [id])
-  content     String
-  fileUrl     String?
+  id       String    @id @default(uuid())
+  groupId  String
+  group    ChatGroup @relation(fields: [groupId], references: [id])
+  senderId String
+  sender   User      @relation(fields: [senderId], references: [id])
+  content  String
+  fileUrl  String?
 
-  createdAt   DateTime  @default(now())
+  createdAt DateTime @default(now())
 }
 
 // -----------------------------------------
@@ -414,26 +450,58 @@ model ChatMessage {
 // -----------------------------------------
 
 model Notification {
-  id          String   @id @default(uuid())
-  userId      String   // Target user
-  title       String
-  message     String
-  isRead      Boolean  @default(false)
-  type        String   // WARNING, INFO, KPI
+  id       String  @id @default(uuid())
+  userId   String // Target user
+  title    String
+  message  String
+  isRead   Boolean @default(false)
+  type     String // WARNING, INFO, KPI, CHAT, TARGET
+  link     String? // Link to related page
+  metadata String? // JSON string for additional data
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([createdAt])
 }
 
 model AuditLog {
-  id          String   @id @default(uuid())
+  id          String  @id @default(uuid())
   userId      String
-  user        User     @relation(fields: [userId], references: [id])
-  action      String   // CREATE, UPDATE, DELETE, UNLOCK
-  module      String   // REPORTS, LEAVES, USERS
+  user        User    @relation(fields: [userId], references: [id])
+  action      String // CREATE, UPDATE, DELETE, UNLOCK
+  module      String // REPORTS, LEAVES, USERS
   description String
   ipAddress   String?
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([module])
+}
+
+// System Settings (NEW - PHASE 1)
+model SystemSetting {
+  id          String  @id @default(uuid())
+  key         String  @unique
+  value       String
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Holiday Calendar (NEW - PHASE 1)
+model Holiday {
+  id          String   @id @default(uuid())
+  date        DateTime @unique @db.Date
+  name        String
+  description String?
+
+  createdAt DateTime @default(now())
+
+  @@index([date])
 }
 
 // -----------------------------------------
@@ -441,21 +509,21 @@ model AuditLog {
 // -----------------------------------------
 
 model ErpConfig {
-  id          String   @id @default(uuid())
-  moduleName  String   @unique
-  isLocked    Boolean  @default(true) // True = Feature is fully locked
+  id         String  @id @default(uuid())
+  moduleName String  @unique
+  isLocked   Boolean @default(true) // True = Feature is fully locked
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 }
 
 model ErpCustomer {
-  id          String   @id @default(uuid())
+  id          String  @id @default(uuid())
   name        String
   phone       String?
   email       String?
-  totalPoints Int      @default(0)
+  totalPoints Int     @default(0)
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 }
 
 model ErpProductRecipe {
@@ -466,7 +534,7 @@ model ErpProductRecipe {
   ingredient      WarehouseItem @relation(fields: [warehouseItemId], references: [id])
   qtyNeeded       Float
 
-  createdAt       DateTime      @default(now())
+  createdAt DateTime @default(now())
 
   @@unique([productId, warehouseItemId])
 }
@@ -475,8 +543,193 @@ model ErpFinanceLedger {
   id          String   @id @default(uuid())
   date        DateTime @db.Date
   description String
-  type        String   // DEBIT, CREDIT
+  type        String // DEBIT, CREDIT
   amount      Float
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
+}
+
+// -----------------------------------------
+// OVERTIME MANAGEMENT (NEW - REQ #4)
+// -----------------------------------------
+
+model OvertimeRecord {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  date       DateTime @db.Date
+  startTime  DateTime
+  endTime    DateTime
+  totalHours Float
+  reason     String
+  status     String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  approverId String?
+  notes      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, date])
+  @@index([status])
+}
+
+// -----------------------------------------
+// PAKLARING / WORK CERTIFICATE (NEW - REQ #12)
+// -----------------------------------------
+
+model Paklaring {
+  id         String @id @default(uuid())
+  employeeId String
+  employee   User   @relation("PaklaringEmployee", fields: [employeeId], references: [id])
+  issuedById String
+  issuedBy   User   @relation("PaklaringIssuer", fields: [issuedById], references: [id])
+
+  position     String // Jabatan saat bekerja
+  startDate    DateTime @db.Date
+  endDate      DateTime @db.Date
+  department   String // Divisi
+  performance  String? // Evaluasi performa
+  notes        String? // Catatan tambahan
+  letterNumber String   @unique // Nomor surat
+  pdfUrl       String? // Link ke PDF paklaring
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([issuedById])
+}
+
+// -----------------------------------------
+// PRODUCTION REJECT TRACKING (NEW - REQ #1)
+// -----------------------------------------
+
+model ProductionReject {
+  id           String           @id @default(uuid())
+  productionId String
+  production   ProductionRecord @relation(fields: [productionId], references: [id])
+  productId    String
+  product      Product          @relation(fields: [productId], references: [id])
+  rejectQty    Int
+  rejectReason String
+  date         DateTime         @db.Date
+  notes        String?
+
+  createdAt DateTime @default(now())
+
+  @@index([productionId])
+  @@index([productId, date])
+}
+
+// -----------------------------------------
+// PURCHASING RECOMMENDATIONS (NEW - REQ #2)
+// -----------------------------------------
+
+model PurchaseRecommendation {
+  id                String  @id @default(uuid())
+  itemName          String
+  currentStock      Int
+  minStock          Int
+  recommendedQty    Int
+  priority          String // HIGH, MEDIUM, LOW
+  reason            String
+  estimatedCost     Float?
+  suggestedSupplier String?
+  status            String  @default("PENDING") // PENDING, ORDERED, COMPLETED
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([priority])
+}
+
+// -----------------------------------------
+// TASK MANAGEMENT (NEW - REQ #3)
+// -----------------------------------------
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Task {
+  id          String       @id @default(uuid())
+  title       String
+  description String?
+  assignedTo  String
+  assignedBy  String
+  status      TaskStatus   @default(TODO)
+  priority    TaskPriority @default(MEDIUM)
+  dueDate     DateTime?
+  completedAt DateTime?
+  attachments String? // JSON array of file URLs
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assignedTo, status])
+  @@index([assignedBy])
+  @@index([dueDate])
+}
+
+// -----------------------------------------
+// EMPLOYEE PERFORMANCE STATISTICS (NEW - REQ #5)
+// -----------------------------------------
+
+model PerformanceMetric {
+  id     String   @id @default(uuid())
+  userId String
+  month  DateTime @db.Date // YYYY-MM-01
+
+  // Metrics
+  attendanceScore Float  @default(0)
+  reportScore     Float  @default(0)
+  targetScore     Float  @default(0)
+  overtimeHours   Float  @default(0)
+  kpiScore        Float  @default(0)
+  grade           String @default("C") // A, B, C, D
+
+  // Additional metrics
+  totalTasks      Int @default(0)
+  completedTasks  Int @default(0)
+  lateSubmissions Int @default(0)
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, month])
+  @@index([month])
+  @@index([kpiScore])
+}
+
+// -----------------------------------------
+// LOCATION TRACKING (NEW - REQ #9)
+// -----------------------------------------
+
+model LocationLog {
+  id        String  @id @default(uuid())
+  userId    String
+  latitude  Float
+  longitude Float
+  address   String?
+  activity  String // CHECK_IN, CHECK_OUT, FIELD_VISIT, etc
+  notes     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
 }

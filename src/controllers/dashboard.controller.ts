@@ -271,3 +271,224 @@ export const getStaffDashboard = async (req: Request, res: Response) => {
     return errorResponse(res, 'Terjadi kesalahan saat memuat dashboard', null, 500);
   }
 };
+
+
+// GET CEO Production Statistics
+export const getProductionStatistics = async (req: Request, res: Response) => {
+  try {
+    const today = new Date();
+    const currentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    
+    // Get all production targets for current month
+    const targets = await prisma.productionTarget.findMany({
+      where: { targetMonth: currentMonth },
+      include: { product: true }
+    });
+
+    let totalTarget = 0;
+    let totalActual = 0;
+    let warningCount = 0;
+    let completedCount = 0;
+
+    const targetDetails = targets.map(t => {
+      const progress = t.targetQty > 0 ? (t.actualQty / t.targetQty) * 100 : 0;
+      totalTarget += t.targetQty;
+      totalActual += t.actualQty;
+      
+      if (progress >= 100) completedCount++;
+      else if (progress < 80) warningCount++;
+
+      return {
+        productName: t.product.name,
+        targetQty: t.targetQty,
+        actualQty: t.actualQty,
+        progress: Math.round(progress * 100) / 100,
+        status: progress >= 100 ? 'COMPLETED' : progress >= 80 ? 'ON_TRACK' : 'WARNING'
+      };
+    });
+
+    const overallProgress = totalTarget > 0 ? Math.round((totalActual / totalTarget) * 100) : 0;
+
+    // Get today's production
+    const todayProduction = await prisma.productionRecord.aggregate({
+      _sum: { quantity: true },
+      where: {
+        date: {
+          gte: today,
+          lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+        }
+      }
+    });
+
+    // Get this month production
+    const monthProduction = await prisma.productionRecord.aggregate({
+      _sum: { quantity: true },
+      where: {
+        date: { gte: currentMonth }
+      }
+    });
+
+    return successResponse(res, {
+      currentMonth: currentMonth.toISOString().substring(0, 7),
+      overallProgress,
+      summary: {
+        totalProducts: targets.length,
+        totalTarget,
+        totalActual,
+        gap: totalTarget - totalActual,
+        completedProducts: completedCount,
+        warningProducts: warningCount
+      },
+      todayProduction: todayProduction._sum.quantity || 0,
+      monthProduction: monthProduction._sum.quantity || 0,
+      products: targetDetails
+    }, 'Production statistics retrieved');
+  } catch (error: any) {
+    console.error('Error getting production statistics:', error);
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+// GET Warehouse Critical Stock
+export const getCriticalStock = async (req: Request, res: Response) => {
+  try {
+    const items = await prisma.warehouseItem.findMany({
+      orderBy: { currentStock: 'asc' }
+    });
+
+    const criticalItems = items.filter(item => item.currentStock <= item.minStock).map(item => {
+      const stockPercent = item.minStock > 0 ? Math.round((item.currentStock / item.minStock) * 100) : 0;
+      return {
+        ...item,
+        stockPercent,
+        priority: stockPercent < 20 ? 'HIGH' : stockPercent < 50 ? 'MEDIUM' : 'LOW',
+        needed: Math.max(0, item.minStock - item.currentStock)
+      };
+    });
+
+    return successResponse(res, {
+      totalItems: items.length,
+      criticalCount: criticalItems.length,
+      highPriority: criticalItems.filter(i => i.priority === 'HIGH').length,
+      items: criticalItems
+    }, 'Critical stock data retrieved');
+  } catch (error: any) {
+    console.error('Error getting critical stock:', error);
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+// GET Branch Performance (Kasir)
+export const getBranchPerformance = async (req: Request, res: Response) => {
+  try {
+    const today = new Date();
+    const currentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    yesterday.setHours(0, 0, 0, 0);
+
+    const branches = await prisma.branch.findMany({
+      include: {
+        cashierReports: {
+          where: {
+            date: { gte: currentMonth }
+          }
+        }
+      }
+    });
+
+    const branchData = await Promise.all(branches.map(async (branch) => {
+      // Today's report
+      const todayReport = await prisma.cashierReport.findFirst({
+        where: { branchId: branch.id, date: today }
+      });
+
+      // Yesterday's report
+      const yesterdayReport = await prisma.cashierReport.findFirst({
+        where: { branchId: branch.id, date: yesterday }
+      });
+
+      // Month total
+      const monthTotal = branch.cashierReports.reduce((sum, r) => sum + r.netTotal, 0);
+
+      return {
+        branchCode: branch.code,
+        branchName: branch.name,
+        todayRevenue: todayReport?.netTotal || 0,
+        yesterdayRevenue: yesterdayReport?.netTotal || 0,
+        monthRevenue: monthTotal,
+        reportSubmitted: !!yesterdayReport,
+        reportCount: branch.cashierReports.length
+      };
+    }));
+
+    const totalTodayRevenue = branchData.reduce((sum, b) => sum + b.todayRevenue, 0);
+    const totalMonthRevenue = branchData.reduce((sum, b) => sum + b.monthRevenue, 0);
+    const lateReports = branchData.filter(b => !b.reportSubmitted).length;
+
+    return successResponse(res, {
+      summary: {
+        totalBranches: branches.length,
+        todayRevenue: totalTodayRevenue,
+        monthRevenue: totalMonthRevenue,
+        lateReports
+      },
+      branches: branchData.sort((a, b) => b.monthRevenue - a.monthRevenue)
+    }, 'Branch performance data retrieved');
+  } catch (error: any) {
+    console.error('Error getting branch performance:', error);
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+// GET Employee Performance Leaderboard (for CEO/Owner dashboard)
+export const getEmployeePerformanceLeaderboard = async (req: Request, res: Response) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const workingDays = Math.max(1, Math.ceil((today.getTime() - thisMonth.getTime()) / (1000 * 60 * 60 * 24)));
+
+    const users = await prisma.user.findMany({
+      where: { isActive: true, deletedAt: null },
+      select: {
+        id: true, name: true,
+        role: { select: { name: true } },
+        division: { select: { name: true } },
+        attendances: { where: { date: { gte: thisMonth }, status: { in: [AttendanceStatus.HADIR, AttendanceStatus.TELAT] } } },
+        dailyReports: { where: { date: { gte: thisMonth }, status: { in: [ReportStatus.SUBMITTED, ReportStatus.LOCKED] } } },
+        targetAssignments: { include: { target: true } }
+      },
+      orderBy: { name: 'asc' }
+    });
+
+    const leaderboard = users.map(u => {
+      const attendanceScore = Math.min(100, Math.round((u.attendances.length / workingDays) * 100));
+      const reportScore = Math.min(100, Math.round((u.dailyReports.length / workingDays) * 100));
+      let targetScore = 75;
+      if (u.targetAssignments.length > 0) {
+        const total = u.targetAssignments.reduce((s, ta) => s + Math.min(100, (ta.currentValue / Math.max(1, ta.target.targetValue)) * 100), 0);
+        targetScore = Math.round(total / u.targetAssignments.length);
+      }
+      const kpiScore = Math.round((attendanceScore * 0.3) + (reportScore * 0.3) + (targetScore * 0.4));
+      return {
+        id: u.id,
+        name: u.name,
+        role: u.role.name,
+        division: u.division.name,
+        attendanceScore,
+        reportScore,
+        targetScore,
+        kpiScore,
+        grade: kpiScore >= 90 ? 'A' : kpiScore >= 75 ? 'B' : kpiScore >= 60 ? 'C' : 'D',
+        attendanceDays: u.attendances.length,
+        reportDays: u.dailyReports.length
+      };
+    }).sort((a, b) => b.kpiScore - a.kpiScore);
+
+    return successResponse(res, leaderboard, 'Data leaderboard performa karyawan berhasil diambil');
+  } catch (error: any) {
+    console.error('Error getting leaderboard:', error);
+    return errorResponse(res, error.message, 500);
+  }
+};

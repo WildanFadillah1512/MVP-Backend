@@ -1,11 +1,16 @@
 import { Router } from 'express';
-import { getUsers, getUserById, createUser, updateUser, deactivateUser, getUserOptions } from '../controllers/user.controller';
+import { getUsers, getUserById, createUser, updateUser, deactivateUser, getUserOptions, updateProfile } from '../controllers/user.controller';
 import { authenticate, authorizeRole } from '../middlewares/auth.middleware';
 
 const router = Router();
 
 router.use(authenticate);
-router.use(authorizeRole(['CEO', 'ADMIN']));
+
+// Profile route (accessible to all authenticated users)
+router.patch('/profile', updateProfile);
+
+// Admin routes
+router.use(authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN']));
 
 router.get('/options', getUserOptions);
 router.get('/', getUsers);
