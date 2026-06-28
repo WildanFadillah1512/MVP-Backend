@@ -1,4 +1,4 @@
-import { PrismaClient, RoleName } from '@prisma/client';
+﻿import { PrismaClient, RoleName } from '@prisma/client';
 import bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -325,7 +325,7 @@ async function main() {
     });
   }
 
-  console.log('✅ Seed completed successfully!');
+  console.log('Seed completed successfully!');
   console.log('- Roles & Divisions created');
   console.log('- Users created');
   console.log('- Chat groups created');
