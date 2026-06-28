@@ -20,14 +20,6 @@ enum RoleName {
   STAFF
 }
 
-enum DivisionName {
-  PRODUKSI
-  PURCHASING
-  KASIR
-  GUDANG
-  NONE
-}
-
 enum AttendanceStatus {
   HADIR
   TELAT
@@ -75,7 +67,7 @@ model Role {
 
 model Division {
   id        String       @id @default(uuid())
-  name      DivisionName @unique
+  name      String       @unique
   users     User[]
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt

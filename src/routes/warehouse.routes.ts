@@ -1,12 +1,13 @@
 import { Router } from 'express';
-import { getItems, createMovement, getMovements, getLowStockRecommendations } from '../controllers/warehouse.controller';
-import { authenticate, authorizeDivision } from '../middlewares/auth.middleware';
+import { getItems, createItem, createMovement, getMovements, getLowStockRecommendations } from '../controllers/warehouse.controller';
+import { authenticate, authorizeDivision, authorizeRole } from '../middlewares/auth.middleware';
 
 const router = Router();
 
 router.use(authenticate);
 
 router.get('/items', getItems);
+router.post('/items', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER']), createItem);
 router.get('/movements', getMovements);
 router.get('/recommendations', getLowStockRecommendations);
 router.post('/movements', authorizeDivision(['GUDANG']), createMovement);

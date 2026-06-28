@@ -43,11 +43,27 @@ export const createCashierReport = async (req: Request, res: Response) => {
       if (productsSold && Array.isArray(productsSold)) {
         for (const item of productsSold) {
           if (item.productId && item.quantity > 0) {
+            const movements = await tx.productStockMovement.findMany({
+              where: { productId: item.productId },
+              select: { type: true, quantity: true }
+            });
+            const availableStock = movements.reduce((sum, movement) => {
+              if (movement.type === 'IN') return sum + movement.quantity;
+              if (movement.type === 'OUT') return sum - movement.quantity;
+              return sum;
+            }, 0);
+            const qty = Number(item.quantity);
+
+            if (availableStock < qty) {
+              const product = await tx.product.findUnique({ where: { id: item.productId } });
+              throw new Error(`Stok produk ${product?.name || item.productId} tidak cukup. Sisa stok: ${availableStock}`);
+            }
+
             await tx.productStockMovement.create({
               data: {
                 productId: item.productId,
                 type: 'OUT',
-                quantity: Number(item.quantity),
+                quantity: qty,
                 reference: `CASHIER-${newReport.id}`,
                 notes: item.isReject ? 'Reject di Kasir/Cabang' : 'Terjual (Kasir)'
               }
@@ -62,7 +78,32 @@ export const createCashierReport = async (req: Request, res: Response) => {
     await writeAuditLog(req, 'CREATE', 'CASHIER', 'Laporan kasir harian dan penjualan dicatat');
     return successResponse(res, report, 'Laporan kasir berhasil disimpan');
   } catch (error) {
-    return errorResponse(res, 'Gagal menyimpan laporan kasir', null, 500);
+    return errorResponse(res, error instanceof Error ? error.message : 'Gagal menyimpan laporan kasir', null, 500);
+  }
+};
+
+export const createBranch = async (req: Request, res: Response) => {
+  try {
+    const { code, name, address } = req.body;
+    if (!code || !name) {
+      return errorResponse(res, 'Kode dan nama cabang wajib diisi', null, 400);
+    }
+
+    const branch = await prisma.branch.create({
+      data: {
+        code: String(code).trim().toUpperCase(),
+        name: String(name).trim(),
+        address: address ? String(address).trim() : null
+      }
+    });
+
+    await writeAuditLog(req, 'CREATE', 'BRANCH', `Cabang baru dibuat: ${branch.name}`);
+    return successResponse(res, branch, 'Cabang berhasil dibuat', 201);
+  } catch (error: any) {
+    if (error?.code === 'P2002') {
+      return errorResponse(res, 'Kode cabang sudah digunakan', null, 400);
+    }
+    return errorResponse(res, 'Gagal membuat cabang', null, 500);
   }
 };
 

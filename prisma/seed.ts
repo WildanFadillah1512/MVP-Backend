@@ -1,4 +1,4 @@
-import { PrismaClient, RoleName, DivisionName, TargetPeriod } from '@prisma/client';
+import { PrismaClient, RoleName } from '@prisma/client';
 import bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -18,7 +18,7 @@ async function main() {
     RoleName.STAFF
   ];
 
-  const roleRecords = {};
+  const roleRecords: Record<RoleName, { id: string }> = {} as Record<RoleName, { id: string }>;
   for (const roleName of roles) {
     roleRecords[roleName] = await prisma.role.upsert({
       where: { name: roleName },
@@ -28,15 +28,9 @@ async function main() {
   }
 
   // 2. Create Divisions
-  const divisions = [
-    DivisionName.PRODUKSI,
-    DivisionName.PURCHASING,
-    DivisionName.KASIR,
-    DivisionName.GUDANG,
-    DivisionName.NONE
-  ];
+  const divisions = ['PRODUKSI', 'PURCHASING', 'KASIR', 'GUDANG', 'NONE'];
 
-  const divisionRecords = {};
+  const divisionRecords: Record<string, { id: string }> = {};
   for (const divisionName of divisions) {
     divisionRecords[divisionName] = await prisma.division.upsert({
       where: { name: divisionName },
@@ -56,7 +50,7 @@ async function main() {
       password,
       name: 'Owner',
       roleId: roleRecords[RoleName.OWNER].id,
-      divisionId: divisionRecords[DivisionName.NONE].id,
+      divisionId: divisionRecords.NONE.id,
       leaveBalances: { create: { totalQuota: 12, usedQuota: 0 } }
     },
   });
@@ -70,7 +64,7 @@ async function main() {
       password,
       name: 'CEO',
       roleId: roleRecords[RoleName.CEO].id,
-      divisionId: divisionRecords[DivisionName.NONE].id,
+      divisionId: divisionRecords.NONE.id,
       supervisorId: owner.id,
       leaveBalances: { create: { totalQuota: 12, usedQuota: 0 } }
     },
@@ -85,7 +79,7 @@ async function main() {
       password,
       name: 'General Manager',
       roleId: roleRecords[RoleName.GM].id,
-      divisionId: divisionRecords[DivisionName.NONE].id,
+      divisionId: divisionRecords.NONE.id,
       supervisorId: ceo.id,
       leaveBalances: { create: { totalQuota: 12, usedQuota: 0 } }
     },
@@ -100,7 +94,7 @@ async function main() {
       password,
       name: 'Admin System',
       roleId: roleRecords[RoleName.ADMIN].id,
-      divisionId: divisionRecords[DivisionName.NONE].id,
+      divisionId: divisionRecords.NONE.id,
       leaveBalances: { create: { totalQuota: 12, usedQuota: 0 } }
     },
   });
@@ -114,7 +108,7 @@ async function main() {
       password,
       name: 'Manager Produksi',
       roleId: roleRecords[RoleName.MANAGER].id,
-      divisionId: divisionRecords[DivisionName.PRODUKSI].id,
+      divisionId: divisionRecords.PRODUKSI.id,
       supervisorId: gm.id,
       leaveBalances: { create: { totalQuota: 12, usedQuota: 0 } }
     },
@@ -128,7 +122,7 @@ async function main() {
       password,
       name: 'Leader Produksi',
       roleId: roleRecords[RoleName.LEADER].id,
-      divisionId: divisionRecords[DivisionName.PRODUKSI].id,
+      divisionId: divisionRecords.PRODUKSI.id,
       supervisorId: managerProduksi.id,
       leaveBalances: { create: { totalQuota: 12, usedQuota: 0 } }
     },
@@ -142,7 +136,7 @@ async function main() {
       password,
       name: 'Staff Produksi',
       roleId: roleRecords[RoleName.STAFF].id,
-      divisionId: divisionRecords[DivisionName.PRODUKSI].id,
+      divisionId: divisionRecords.PRODUKSI.id,
       supervisorId: leaderProduksi.id,
       leaveBalances: { create: { totalQuota: 12, usedQuota: 0 } }
     },
@@ -157,7 +151,7 @@ async function main() {
       password,
       name: 'Staff Purchasing',
       roleId: roleRecords[RoleName.STAFF].id,
-      divisionId: divisionRecords[DivisionName.PURCHASING].id,
+      divisionId: divisionRecords.PURCHASING.id,
       supervisorId: gm.id,
       leaveBalances: { create: { totalQuota: 12, usedQuota: 0 } }
     }
@@ -172,7 +166,7 @@ async function main() {
       password,
       name: 'Staff Gudang',
       roleId: roleRecords[RoleName.STAFF].id,
-      divisionId: divisionRecords[DivisionName.GUDANG].id,
+      divisionId: divisionRecords.GUDANG.id,
       supervisorId: gm.id,
       leaveBalances: { create: { totalQuota: 12, usedQuota: 0 } }
     }
@@ -187,7 +181,7 @@ async function main() {
       password,
       name: 'Staff Kasir',
       roleId: roleRecords[RoleName.STAFF].id,
-      divisionId: divisionRecords[DivisionName.KASIR].id,
+      divisionId: divisionRecords.KASIR.id,
       supervisorId: gm.id,
       leaveBalances: { create: { totalQuota: 12, usedQuota: 0 } }
     }

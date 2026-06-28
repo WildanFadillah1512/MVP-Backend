@@ -15,12 +15,57 @@ export const getItems = async (req: Request, res: Response) => {
   }
 };
 
+export const createItem = async (req: Request, res: Response) => {
+  try {
+    const { code, name, category, minStock, currentStock, unit } = req.body;
+    if (!code || !name || !category || !unit) {
+      return errorResponse(res, 'Kode, nama, kategori, dan unit barang wajib diisi', null, 400);
+    }
+
+    const item = await prisma.warehouseItem.create({
+      data: {
+        code: String(code).trim().toUpperCase(),
+        name: String(name).trim(),
+        category: String(category).trim(),
+        minStock: Number(minStock || 0),
+        currentStock: Number(currentStock || 0),
+        unit: String(unit).trim()
+      }
+    });
+
+    if (item.currentStock > 0) {
+      await prisma.warehouseMovement.create({
+        data: {
+          warehouseItemId: item.id,
+          type: 'IN',
+          quantity: item.currentStock,
+          notes: 'Stok awal master barang'
+        }
+      });
+    }
+
+    await writeAuditLog(req, 'CREATE', 'WAREHOUSE_ITEM', `Master barang gudang dibuat: ${item.name}`);
+    return successResponse(res, item, 'Master barang berhasil dibuat', 201);
+  } catch (error: any) {
+    if (error?.code === 'P2002') {
+      return errorResponse(res, 'Kode barang sudah digunakan', null, 400);
+    }
+    return errorResponse(res, 'Gagal membuat master barang', null, 500);
+  }
+};
+
 export const createMovement = async (req: Request, res: Response) => {
   try {
     const { warehouseItemId, type, quantity, notes } = req.body;
     const qty = Number(quantity);
 
     const result = await prisma.$transaction(async (tx) => {
+      if (type === 'OUT') {
+        const item = await tx.warehouseItem.findUnique({ where: { id: warehouseItemId } });
+        if (!item) throw new Error('Barang tidak ditemukan');
+        if (item.currentStock < qty) throw new Error(`Stok ${item.name} tidak cukup. Sisa: ${item.currentStock}`);
+      }
+
       // Create movement log
       const movement = await tx.warehouseMovement.create({
         data: {
@@ -45,7 +90,7 @@ export const createMovement = async (req: Request, res: Response) => {
         await writeAuditLog(req, 'CREATE', 'WAREHOUSE', 'Pergerakan stok gudang dicatat: ' + type);
     return successResponse(res, result, `Stok ${type} berhasil dicatat`);
   } catch (error) {
-    return errorResponse(res, 'Gagal mencatat pergerakan stok', null, 500);
+    return errorResponse(res, error instanceof Error ? error.message : 'Gagal mencatat pergerakan stok', null, 500);
   }
 };
 
@@ -63,12 +108,6 @@ export const getMovements = async (req: Request, res: Response) => {
 
 export const getLowStockRecommendations = async (req: Request, res: Response) => {
   try {
-    const lowStockItems = await prisma.warehouseItem.findMany({
-      where: {
-        currentStock: { lte: prisma.warehouseItem.fields.minStock }
-      },
-      orderBy: { currentStock: 'asc' }
-    });
     // Filter in-memory since Prisma can't compare two columns directly without raw SQL
     const all = await prisma.warehouseItem.findMany({ orderBy: { currentStock: 'asc' } });
     const filtered = all.filter(i => i.currentStock <= i.minStock);

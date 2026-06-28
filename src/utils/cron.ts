@@ -29,7 +29,7 @@ export const setupCronJobs = () => {
           }
         });
 
-        if (attendance && [AttendanceStatus.HADIR, AttendanceStatus.TELAT].includes(attendance.status)) {
+        if (attendance && (attendance.status === AttendanceStatus.HADIR || attendance.status === AttendanceStatus.TELAT)) {
           const existingReport = await prisma.dailyReport.findUnique({
             where: {
               userId_date: {

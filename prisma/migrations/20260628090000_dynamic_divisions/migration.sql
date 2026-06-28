@@ -1,0 +1,2 @@
+ALTER TABLE "Division" ALTER COLUMN "name" TYPE TEXT USING "name"::TEXT;
+DROP TYPE IF EXISTS "DivisionName";

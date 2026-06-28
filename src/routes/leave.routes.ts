@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { createLeaveRequest, getMyLeaves, getTeamLeaves, approveLeave } from '../controllers/leave.controller';
-import { authenticate } from '../middlewares/auth.middleware';
+import { authenticate, authorizeRole } from '../middlewares/auth.middleware';
 
 const router = Router();
 
 router.use(authenticate);
 router.post('/', createLeaveRequest);
 router.get('/me', getMyLeaves);
-router.get('/team', getTeamLeaves);
-router.patch('/:id/approve', approveLeave);
+router.get('/team', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER', 'LEADER']), getTeamLeaves);
+router.patch('/:id/approve', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER', 'LEADER']), approveLeave);
 
 export default router;

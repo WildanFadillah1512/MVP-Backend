@@ -11,10 +11,10 @@ router.post('/check-in', checkIn);
 router.post('/check-out', checkOut);
 router.get('/me', getMyAttendance);
 
-// Rekap absensi SEMUA karyawan hari ini - hanya atasan (Owner/CEO/GM/Admin/Manager)
-router.get('/today/all', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER']), getAllAttendanceToday);
+// Rekap absensi tim hari ini - atasan melihat sesuai struktur/hak akses
+router.get('/today/all', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER', 'LEADER']), getAllAttendanceToday);
 
-// Tracking Lokasi GPS - hanya atasan
-router.get('/locations', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER']), getLocationLogs);
+// Tracking Lokasi GPS - atasan melihat sesuai struktur/hak akses
+router.get('/locations', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER', 'LEADER']), getLocationLogs);
 
 export default router;

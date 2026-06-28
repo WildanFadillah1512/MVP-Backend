@@ -6,9 +6,9 @@ const router = Router();
 
 router.use(authenticate);
 
-router.post('/', authorizeRole(['CEO', 'MANAGER', 'LEADER']), createTarget);
+router.post('/', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER', 'LEADER']), createTarget);
 router.get('/me', getMyTargets);
-router.get('/team', authorizeRole(['CEO', 'MANAGER', 'LEADER']), getTeamTargets);
+router.get('/team', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER', 'LEADER']), getTeamTargets);
 router.patch('/:id', updateProgress);
 
 export default router;

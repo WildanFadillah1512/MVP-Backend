@@ -10,8 +10,8 @@ router.use(authenticate);
 router.use(authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN']));
 
 router.get('/crm/customers', requireErpUnlock('CRM'), getCustomers);
-router.get('/finance/ledger', requireErpUnlock('FINANCE'), getFinanceLedger);
-router.post('/unlock/:module', unlockModule);
+router.get('/finance/ledger', authorizeRole(['OWNER', 'CEO', 'ADMIN']), requireErpUnlock('FINANCE'), getFinanceLedger);
+router.post('/unlock/:module', authorizeRole(['OWNER', 'CEO', 'ADMIN']), unlockModule);
 
 // Check lock status for frontend
 router.get('/status', async (req, res) => {

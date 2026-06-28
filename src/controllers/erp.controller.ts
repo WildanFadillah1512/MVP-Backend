@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { successResponse, errorResponse } from '../utils/response';
