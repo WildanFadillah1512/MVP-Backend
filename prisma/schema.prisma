@@ -308,8 +308,102 @@ model ProductionTarget {
 }
 
 // -----------------------------------------
-// PURCHASING (PHASE 1)
+// PURCHASING (PHASE 1) - EXTENDED
 // -----------------------------------------
+
+enum PurchaseStatus {
+  DRAFT
+  SUBMITTED_BY_WAREHOUSE
+  PENDING_STAFF_PRICE
+  PENDING_MANAGER
+  PENDING_CEO
+  APPROVED
+  REJECTED
+  PURCHASED
+}
+
+model Supplier {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  contactName String?
+  phone       String?
+  email       String?
+  address     String?
+  status      String   @default("ACTIVE") // ACTIVE, INACTIVE
+  
+  // Authorization
+  createdById String
+  approvedById String?
+  approvedAt   DateTime?
+
+  supplierPrices SupplierPrice[]
+  purchaseRequests PurchaseRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+model SupplierPrice {
+  id              String   @id @default(uuid())
+  supplierId      String
+  supplier        Supplier @relation(fields: [supplierId], references: [id])
+  warehouseItemId String
+  item            WarehouseItem @relation(fields: [warehouseItemId], references: [id])
+  unitPrice       Float
+  isActive        Boolean  @default(true)
+  
+  // Set by CEO only
+  setCeoId        String
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([supplierId, warehouseItemId])
+  @@index([warehouseItemId])
+}
+
+model PurchaseRequest {
+  id                String         @id @default(uuid())
+  requestNumber     String         @unique
+  warehouseItemId   String
+  item              WarehouseItem  @relation(fields: [warehouseItemId], references: [id])
+  requestedQty      Int
+  estimatedBudget   Float?
+  actualPrice       Float?
+  actualQty         Int?
+  supplierId        String?
+  supplier          Supplier?      @relation(fields: [supplierId], references: [id])
+  
+  status            PurchaseStatus @default(DRAFT)
+  priority          String         @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  
+  // Workflow
+  requestedById     String   // Warehouse staff
+  staffId           String?  // Purchasing staff
+  managerId         String?  // Manager approval
+  ceoId             String?  // CEO approval
+  
+  // Timestamps for workflow
+  submittedAt       DateTime?
+  staffProcessedAt  DateTime?
+  managerApprovedAt DateTime?
+  ceoApprovedAt     DateTime?
+  purchasedAt       DateTime?
+  
+  notes             String?
+  rejectReason      String?
+  receiptUrl        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([requestedById])
+  @@index([warehouseItemId])
+}
 
 model ShoppingNeed {
   id       String  @id @default(uuid())
@@ -384,6 +478,8 @@ model WarehouseItem {
 
   movements WarehouseMovement[]
   recipes   ErpProductRecipe[]
+  supplierPrices SupplierPrice[]
+  purchaseRequests PurchaseRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -436,6 +532,9 @@ model ChatMessage {
   sender   User      @relation(fields: [senderId], references: [id])
   content  String
   fileUrl  String?
+  fileName String?
+  fileType String?
+  fileSize Int?
 
   createdAt DateTime @default(now())
 }
@@ -729,4 +828,51 @@ model LocationLog {
 
   @@index([userId, createdAt])
   @@index([createdAt])
+}
+
+// -----------------------------------------
+// PAYROLL / SLIP GAJI
+// -----------------------------------------
+
+enum PayrollStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  PAID
+}
+
+model Payroll {
+  id              String        @id @default(uuid())
+  userId          String
+  period          DateTime      @db.Date // YYYY-MM-01
+  
+  // Komponen Gaji
+  basicSalary     Float         @default(0)
+  allowances      Float         @default(0) // Tunjangan
+  overtimePay     Float         @default(0)
+  bonus           Float         @default(0)
+  deductions      Float         @default(0) // Potongan
+  totalSalary     Float         @default(0)
+  
+  // Metadata
+  workDays        Int           @default(0)
+  attendanceDays  Int           @default(0)
+  leaveDays       Int           @default(0)
+  overtimeHours   Float         @default(0)
+  
+  status          PayrollStatus @default(DRAFT)
+  approvedById    String?
+  approvedAt      DateTime?
+  paidAt          DateTime?
+  
+  notes           String?
+  pdfUrl          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, period])
+  @@index([userId])
+  @@index([period])
+  @@index([status])
 }

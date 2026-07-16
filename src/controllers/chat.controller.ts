@@ -61,7 +61,7 @@ export const sendMessage = async (req: Request, res: Response) => {
   try {
     const { id } = req.params; // Group ID
     const userId = (req as any).user.id;
-    const { content } = req.body;
+    const { content, fileUrl, fileName, fileType, fileSize } = req.body;
 
     const isMember = await prisma.chatGroupMember.findUnique({
       where: { groupId_userId: { groupId: id, userId } }
@@ -75,7 +75,11 @@ export const sendMessage = async (req: Request, res: Response) => {
       data: {
         groupId: id,
         senderId: userId,
-        content
+        content,
+        fileUrl,
+        fileName,
+        fileType,
+        fileSize: fileSize ? Number(fileSize) : null
       },
       include: {
         sender: { select: { id: true, name: true, role: { select: { name: true } } } }

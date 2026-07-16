@@ -19,6 +19,11 @@ import notificationRoutes from './notification.routes';
 import taskRoutes from './task.routes';
 import overtimeRoutes from './overtime.routes';
 import paklaringRoutes from './paklaring.routes';
+import supplierRoutes from './supplier.routes';
+import payrollRoutes from './payroll.routes';
+import purchaseRequestRoutes from './purchase-request.routes';
+import recipeRoutes from './recipe.routes';
+import fileUploadRoutes from './file-upload.routes';
 
 const router = Router();
 
@@ -30,7 +35,10 @@ router.use('/dashboard', dashboardRoutes);
 router.use('/targets', targetRoutes);
 router.use('/production', productionRoutes);
 router.use('/production/targets', productionTargetRoutes);
+router.use('/recipes', recipeRoutes);
 router.use('/purchasing', purchasingRoutes);
+router.use('/purchase-requests', purchaseRequestRoutes);
+router.use('/suppliers', supplierRoutes);
 router.use('/cashier', cashierRoutes);
 router.use('/warehouse', warehouseRoutes);
 router.use('/chat', chatRoutes);
@@ -42,5 +50,7 @@ router.use('/notifications', notificationRoutes);
 router.use('/tasks', taskRoutes);
 router.use('/overtime', overtimeRoutes);
 router.use('/paklaring', paklaringRoutes);
+router.use('/payroll', payrollRoutes);
+router.use('/file-upload', fileUploadRoutes);
 
 export default router;
