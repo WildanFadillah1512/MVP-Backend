@@ -2,11 +2,14 @@ import { Router } from 'express';
 import {
   uploadProfilePhoto,
   uploadChatFile,
-  uploadGenericFile
+  uploadGenericFile,
+  streamDriveFile
 } from '../controllers/file-upload.controller';
 import { authenticate } from '../middlewares/auth.middleware';
 
 const router = Router();
+
+router.get('/drive-file/:fileId', streamDriveFile);
 
 router.use(authenticate);
 

@@ -17,6 +17,8 @@ const FOLDER_TYPES: Record<string, string> = {
   'GENERAL': 'General_Files'
 };
 
+const DAILY_FOLDER_TYPES = new Set(['DAILY_UPLOADS']);
+
 let _drive: ReturnType<typeof google.drive> | null = null;
 
 function getGoogleAuth() {
@@ -77,13 +79,27 @@ function getDrive() {
 
 const escapeDriveQueryValue = (value: string) => value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
+const sanitizeFolderName = (value?: string | null) => {
+  const cleaned = (value || 'Unknown_Uploader')
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .slice(0, 80);
 
-async function getOrCreateDailyFolder(): Promise<string> {
-  const dateFolderName = format(new Date(), 'yyyy-MM-dd');
+  return cleaned || 'Unknown_Uploader';
+};
 
+const getPublicBaseUrl = () => (
+  process.env.PUBLIC_BASE_URL ||
+  process.env.BACKEND_PUBLIC_URL ||
+  ''
+).replace(/\/$/, '');
+
+async function getOrCreateChildFolder(parentFolderId: string, folderName: string): Promise<string> {
   try {
     const response = await getDrive().files.list({
-      q: `mimeType='application/vnd.google-apps.folder' and name='${escapeDriveQueryValue(dateFolderName)}' and '${MAIN_FOLDER_ID}' in parents and trashed=false`,
+      q: `mimeType='application/vnd.google-apps.folder' and name='${escapeDriveQueryValue(folderName)}' and '${parentFolderId}' in parents and trashed=false`,
       fields: 'files(id, name)',
       spaces: 'drive',
       supportsAllDrives: true,
@@ -95,9 +111,9 @@ async function getOrCreateDailyFolder(): Promise<string> {
     }
 
     const fileMetadata = {
-      name: dateFolderName,
+      name: folderName,
       mimeType: 'application/vnd.google-apps.folder',
-      parents: [MAIN_FOLDER_ID],
+      parents: [parentFolderId],
     };
 
     const folder = await getDrive().files.create({
@@ -113,40 +129,57 @@ async function getOrCreateDailyFolder(): Promise<string> {
   }
 }
 
-async function getOrCreateSubFolder(folderType: string): Promise<string> {
+async function getUploadFolder(folderType: string, uploaderName?: string | null): Promise<string> {
   const folderName = FOLDER_TYPES[folderType] || FOLDER_TYPES['GENERAL'];
 
   try {
-    const response = await getDrive().files.list({
-      q: `mimeType='application/vnd.google-apps.folder' and name='${escapeDriveQueryValue(folderName)}' and '${MAIN_FOLDER_ID}' in parents and trashed=false`,
-      fields: 'files(id, name)',
-      spaces: 'drive',
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true
-    });
+    const categoryFolderId = await getOrCreateChildFolder(MAIN_FOLDER_ID, folderName);
+    const periodFolderName = DAILY_FOLDER_TYPES.has(folderType)
+      ? format(new Date(), 'yyyy-MM-dd')
+      : format(new Date(), 'yyyy-MM');
+    const periodFolderId = await getOrCreateChildFolder(categoryFolderId, periodFolderName);
 
-    if (response.data.files && response.data.files.length > 0) {
-      return response.data.files[0].id!;
+    if (!uploaderName) {
+      return periodFolderId;
     }
 
-    const fileMetadata = {
-      name: folderName,
-      mimeType: 'application/vnd.google-apps.folder',
-      parents: [MAIN_FOLDER_ID],
-    };
-
-    const folder = await getDrive().files.create({
-      requestBody: fileMetadata,
-      fields: 'id',
-      supportsAllDrives: true
-    });
-
-    return folder.data.id!;
+    return getOrCreateChildFolder(periodFolderId, sanitizeFolderName(uploaderName));
   } catch (error) {
     console.error('Error creating/finding GDrive subfolder:', error);
     console.warn(`Falling back to main Google Drive folder for folder type ${folderType}`);
     return MAIN_FOLDER_ID;
   }
+}
+
+export function getDriveFileProxyUrl(fileId: string): string {
+  const baseUrl = getPublicBaseUrl();
+  if (!baseUrl) {
+    return `https://drive.google.com/uc?export=view&id=${fileId}`;
+  }
+
+  return `${baseUrl}/api/file-upload/drive-file/${fileId}`;
+}
+
+export async function getDriveFileStream(fileId: string) {
+  const metadata = await getDrive().files.get({
+    fileId,
+    fields: 'id, name, mimeType, size',
+    supportsAllDrives: true
+  });
+
+  const streamResponse = await getDrive().files.get(
+    {
+      fileId,
+      alt: 'media',
+      supportsAllDrives: true
+    } as any,
+    { responseType: 'stream' } as any
+  );
+
+  return {
+    metadata: metadata.data,
+    stream: streamResponse.data as NodeJS.ReadableStream
+  };
 }
 
 export async function uploadToGoogleDrive(
@@ -157,7 +190,7 @@ export async function uploadToGoogleDrive(
   userName: string
 ): Promise<{ fileId: string; fileUrl: string }> {
   try {
-    const parentFolderId = await getOrCreateDailyFolder();
+    const parentFolderId = await getUploadFolder('DAILY_UPLOADS', userName);
 
     const safeDivision = divisionName.toUpperCase().replace(/\s+/g, '');
     const safeUser = userName.replace(/\s+/g, '_');
@@ -185,7 +218,7 @@ export async function uploadToGoogleDrive(
 
     return {
       fileId: file.data.id!,
-      fileUrl: file.data.webViewLink!,
+      fileUrl: getDriveFileProxyUrl(file.data.id!),
     };
   } catch (error: any) {
     console.error('Google Drive Upload Error:', error.message);
@@ -197,10 +230,11 @@ export async function uploadToGoogleDrive(
 export async function uploadToGDrive(
   filePath: string,
   originalName: string,
-  folderType: string = 'GENERAL'
+  folderType: string = 'GENERAL',
+  uploaderName?: string | null
 ): Promise<string> {
   try {
-    const parentFolderId = await getOrCreateSubFolder(folderType);
+    const parentFolderId = await getUploadFolder(folderType, uploaderName);
 
     const timestamp = new Date().getTime();
     const formattedName = `${timestamp}_${originalName}`;
@@ -233,9 +267,7 @@ export async function uploadToGDrive(
       supportsAllDrives: true
     });
 
-    // Return direct link
-    const directLink = `https://drive.google.com/uc?export=view&id=${file.data.id}`;
-    return directLink;
+    return getDriveFileProxyUrl(file.data.id!);
   } catch (error: any) {
     console.error('Google Drive Upload Error:', error.message);
     throw new Error('Gagal mengupload file ke Google Drive: ' + error.message);

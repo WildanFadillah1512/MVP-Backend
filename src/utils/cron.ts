@@ -479,7 +479,7 @@ async function createMonthlyBackup() {
     await fs.writeFile(backupPath, JSON.stringify(data, null, 2), 'utf8');
 
     try {
-      const driveUrl = await uploadToGDrive(backupPath, `monthly-backup-${stamp}.json`, 'BACKUPS');
+      const driveUrl = await uploadToGDrive(backupPath, `monthly-backup-${stamp}.json`, 'BACKUPS', 'System');
       console.log(`[CRON] Monthly backup uploaded to Google Drive: ${driveUrl}`);
     } catch (uploadError) {
       console.error('[CRON] Monthly backup created locally but Google Drive upload failed:', uploadError);

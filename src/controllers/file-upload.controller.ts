@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
 import { errorResponse, successResponse } from '../utils/response';
-import { uploadToGDrive } from '../services/gdrive.service';
+import { getDriveFileStream, uploadToGDrive } from '../services/gdrive.service';
 import formidable from 'formidable';
 import fs from 'fs';
 import path from 'path';
+import prisma from '../utils/prisma';
 
 const MAX_PROFILE_PHOTO_SIZE = 2 * 1024 * 1024; // 2MB
 const MAX_CHAT_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -33,6 +34,43 @@ const localUploadResponse = (req: Request, file: formidable.File, message: strin
   storage: 'LOCAL_FALLBACK',
   warning: message
 });
+
+const getUploaderFolderName = async (req: Request) => {
+  const tokenUser = (req as any).user;
+  if (!tokenUser?.id) return 'Unknown_Uploader';
+
+  const user = await prisma.user.findUnique({
+    where: { id: tokenUser.id },
+    select: { name: true, role: { select: { name: true } }, division: { select: { name: true } } }
+  }).catch(() => null);
+
+  return user?.name || `${tokenUser.role || 'Unknown'}_${tokenUser.division || 'NONE'}`;
+};
+
+export const streamDriveFile = async (req: Request, res: Response) => {
+  try {
+    const { fileId } = req.params;
+    if (!fileId) {
+      return errorResponse(res, 'File ID tidak valid', null, 400);
+    }
+
+    const { metadata, stream } = await getDriveFileStream(fileId);
+
+    if (metadata.mimeType) {
+      res.setHeader('Content-Type', metadata.mimeType);
+    }
+    if (metadata.size) {
+      res.setHeader('Content-Length', metadata.size);
+    }
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
+    return stream.pipe(res);
+  } catch (error: any) {
+    console.error('Google Drive stream error:', error.message);
+    return errorResponse(res, 'Gagal membaca file Google Drive', null, 404);
+  }
+};
 
 export const uploadProfilePhoto = async (req: Request, res: Response) => {
   try {
@@ -65,8 +103,9 @@ export const uploadProfilePhoto = async (req: Request, res: Response) => {
       }
 
       try {
+        const uploaderName = await getUploaderFolderName(req);
         // Upload to Google Drive
-        const gdLink = await uploadToGDrive(file.filepath, file.originalFilename || 'profile.jpg', 'PROFILE_PHOTOS');
+        const gdLink = await uploadToGDrive(file.filepath, file.originalFilename || 'profile.jpg', 'PROFILE_PHOTOS', uploaderName);
         
         // Delete local file
         fs.unlinkSync(file.filepath);
@@ -113,8 +152,9 @@ export const uploadChatFile = async (req: Request, res: Response) => {
       }
 
       try {
+        const uploaderName = await getUploaderFolderName(req);
         // Upload to Google Drive
-        const gdLink = await uploadToGDrive(file.filepath, file.originalFilename || 'file', 'CHAT_ATTACHMENTS');
+        const gdLink = await uploadToGDrive(file.filepath, file.originalFilename || 'file', 'CHAT_ATTACHMENTS', uploaderName);
         
         // Delete local file
         fs.unlinkSync(file.filepath);
@@ -158,8 +198,9 @@ export const uploadGenericFile = async (req: Request, res: Response) => {
       const folderType = folderField || 'GENERAL';
 
       try {
+        const uploaderName = await getUploaderFolderName(req);
         // Upload to Google Drive
-        const gdLink = await uploadToGDrive(file.filepath, file.originalFilename || 'file', folderType);
+        const gdLink = await uploadToGDrive(file.filepath, file.originalFilename || 'file', folderType, uploaderName);
         
         // Delete local file
         fs.unlinkSync(file.filepath);
