@@ -17,6 +17,23 @@ const getUploadDir = () => {
   return uploadDir;
 };
 
+const getPublicFileUrl = (req: Request, filePath: string) => {
+  const configuredBaseUrl = process.env.PUBLIC_BASE_URL || process.env.BACKEND_PUBLIC_URL;
+  const protocol = (req.headers['x-forwarded-proto']?.toString().split(',')[0] || req.protocol || 'http');
+  const host = req.get('host');
+  const baseUrl = configuredBaseUrl || `${protocol}://${host}`;
+  return `${baseUrl.replace(/\/$/, '')}/uploads/${path.basename(filePath)}`;
+};
+
+const localUploadResponse = (req: Request, file: formidable.File, message: string) => ({
+  fileUrl: getPublicFileUrl(req, file.filepath),
+  fileName: file.originalFilename,
+  fileSize: file.size,
+  fileType: file.mimetype,
+  storage: 'LOCAL_FALLBACK',
+  warning: message
+});
+
 export const uploadProfilePhoto = async (req: Request, res: Response) => {
   try {
     const form = formidable({
@@ -58,15 +75,16 @@ export const uploadProfilePhoto = async (req: Request, res: Response) => {
           fileUrl: gdLink,
           fileName: file.originalFilename,
           fileSize: file.size,
-          fileType: file.mimetype
+          fileType: file.mimetype,
+          storage: 'GOOGLE_DRIVE'
         }, 'Foto profil berhasil diupload');
       } catch (uploadError: any) {
-        fs.unlinkSync(file.filepath);
-        return errorResponse(res, 'Gagal upload ke Google Drive: ' + uploadError.message, 500);
+        console.error('Profile photo Google Drive upload failed, using local fallback:', uploadError.message);
+        return successResponse(res, localUploadResponse(req, file, uploadError.message), 'Foto profil tersimpan sementara di server');
       }
     });
   } catch (error: any) {
-    return errorResponse(res, error.message, 500);
+    return errorResponse(res, error.message, null, 500);
   }
 };
 
@@ -105,15 +123,16 @@ export const uploadChatFile = async (req: Request, res: Response) => {
           fileUrl: gdLink,
           fileName: file.originalFilename,
           fileSize: file.size,
-          fileType: file.mimetype
+          fileType: file.mimetype,
+          storage: 'GOOGLE_DRIVE'
         }, 'File berhasil diupload');
       } catch (uploadError: any) {
-        fs.unlinkSync(file.filepath);
-        return errorResponse(res, 'Gagal upload ke Google Drive: ' + uploadError.message, 500);
+        console.error('Chat file Google Drive upload failed, using local fallback:', uploadError.message);
+        return successResponse(res, localUploadResponse(req, file, uploadError.message), 'File tersimpan sementara di server');
       }
     });
   } catch (error: any) {
-    return errorResponse(res, error.message, 500);
+    return errorResponse(res, error.message, null, 500);
   }
 };
 
@@ -149,16 +168,15 @@ export const uploadGenericFile = async (req: Request, res: Response) => {
           fileUrl: gdLink,
           fileName: file.originalFilename,
           fileSize: file.size,
-          fileType: file.mimetype
+          fileType: file.mimetype,
+          storage: 'GOOGLE_DRIVE'
         }, 'File berhasil diupload');
       } catch (uploadError: any) {
-        if (fs.existsSync(file.filepath)) {
-          fs.unlinkSync(file.filepath);
-        }
-        return errorResponse(res, 'Gagal upload ke Google Drive: ' + uploadError.message, 500);
+        console.error('Generic file Google Drive upload failed, using local fallback:', uploadError.message);
+        return successResponse(res, localUploadResponse(req, file, uploadError.message), 'File tersimpan sementara di server');
       }
     });
   } catch (error: any) {
-    return errorResponse(res, error.message, 500);
+    return errorResponse(res, error.message, null, 500);
   }
 };

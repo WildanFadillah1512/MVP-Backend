@@ -3,6 +3,15 @@ import prisma from '../utils/prisma';
 import { successResponse, errorResponse } from '../utils/response';
 import { writeAuditLog } from '../utils/audit';
 import { uploadToGoogleDrive } from '../services/gdrive.service';
+import path from 'path';
+
+const getPublicFileUrl = (req: Request, filePath: string) => {
+  const configuredBaseUrl = process.env.PUBLIC_BASE_URL || process.env.BACKEND_PUBLIC_URL;
+  const protocol = (req.headers['x-forwarded-proto']?.toString().split(',')[0] || req.protocol || 'http');
+  const host = req.get('host');
+  const baseUrl = configuredBaseUrl || `${protocol}://${host}`;
+  return `${baseUrl.replace(/\/$/, '')}/uploads/${path.basename(filePath)}`;
+};
 
 export const uploadDailyFile = async (req: Request, res: Response) => {
   try {
@@ -40,16 +49,11 @@ export const uploadDailyFile = async (req: Request, res: Response) => {
         fs.unlinkSync(file.path);
       }
     } catch (gdriveError: any) {
-      // Delete temporary file even on failure
-      const fs = require('fs');
-      if (fs.existsSync(file.path)) {
-        fs.unlinkSync(file.path);
-      }
-      
-      // If GDrive fails (likely because credentials aren't set up yet by the user), 
-      // fallback to mock success but return error message in data for development.
-      console.error(gdriveError);
-      return errorResponse(res, 'Google Drive belum dikonfigurasi oleh Administrator (Kredensial Service Account belum ada).', null, 500);
+      console.error('Daily upload Google Drive failed, using local fallback:', gdriveError.message);
+      driveResult = {
+        fileId: 'LOCAL_FALLBACK',
+        fileUrl: getPublicFileUrl(req, file.path),
+      };
     }
 
     // Save metadata to Database
@@ -63,7 +67,7 @@ export const uploadDailyFile = async (req: Request, res: Response) => {
       }
     });
 
-    return successResponse(res, uploadRecord, 'File berhasil diunggah ke Google Drive dan Database');
+    return successResponse(res, uploadRecord, driveResult.fileId === 'LOCAL_FALLBACK' ? 'File tersimpan sementara di server' : 'File berhasil diunggah ke Google Drive dan Database');
   } catch (error) {
     console.error('Upload error:', error);
     return errorResponse(res, 'Terjadi kesalahan internal', null, 500);

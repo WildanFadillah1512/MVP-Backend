@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
+import path from 'path';
 import { initSocket } from './socket';
 import routes from './routes';
 import { setupCronJobs } from './utils/cron';
@@ -20,6 +21,7 @@ app.use(cors({
 }));
 app.use(helmet());
 app.use(morgan('dev'));
+app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
 
 app.use('/api', routes);
 

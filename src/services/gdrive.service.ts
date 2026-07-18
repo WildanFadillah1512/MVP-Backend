@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
-import stream from 'stream';
 import { format } from 'date-fns';
+import fs from 'fs';
+import path from 'path';
 
 const MAIN_FOLDER_ID = process.env.GDRIVE_MAIN_FOLDER_ID || '1LcuiL-H8ibHkMAID6mhJtfCk89bTxsEa';
 
@@ -11,22 +12,70 @@ const FOLDER_TYPES: Record<string, string> = {
   'CHAT_ATTACHMENTS': 'Chat_Attachments',
   'PURCHASE_RECEIPTS': 'Purchase_Receipts',
   'PAYROLL_DOCS': 'Payroll_Documents',
+  'CASHIER_DEPOSITS': 'Cashier_Deposits',
   'BACKUPS': 'Backups',
   'GENERAL': 'General_Files'
 };
 
 let _drive: ReturnType<typeof google.drive> | null = null;
 
+function getGoogleAuth() {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+  const credentials = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  const scopes = ['https://www.googleapis.com/auth/drive'];
+
+  if (clientId && clientSecret && refreshToken) {
+    const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
+    oauth2Client.setCredentials({ refresh_token: refreshToken });
+    return oauth2Client;
+  }
+
+  if (!credentials) {
+    return new google.auth.GoogleAuth({
+      keyFile: './google-credentials.json',
+      scopes,
+    });
+  }
+
+  const trimmed = credentials.trim();
+
+  if (trimmed.startsWith('{')) {
+    return new google.auth.GoogleAuth({
+      credentials: JSON.parse(trimmed),
+      scopes,
+    });
+  }
+
+  try {
+    const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
+    if (decoded.trim().startsWith('{')) {
+      return new google.auth.GoogleAuth({
+        credentials: JSON.parse(decoded),
+        scopes,
+      });
+    }
+  } catch {
+    // Not base64 JSON, treat it as a file path below.
+  }
+
+  const normalizedPath = path.resolve(process.cwd(), trimmed.replace(/^["']|["']$/g, ''));
+  return new google.auth.GoogleAuth({
+    keyFile: fs.existsSync(normalizedPath) ? normalizedPath : trimmed,
+    scopes,
+  });
+}
+
 function getDrive() {
   if (!_drive) {
-    const auth = new google.auth.GoogleAuth({
-      keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS || './google-credentials.json',
-      scopes: ['https://www.googleapis.com/auth/drive'],
-    });
+    const auth = getGoogleAuth();
     _drive = google.drive({ version: 'v3', auth });
   }
   return _drive;
 }
+
+const escapeDriveQueryValue = (value: string) => value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
 
 async function getOrCreateDailyFolder(): Promise<string> {
@@ -34,7 +83,7 @@ async function getOrCreateDailyFolder(): Promise<string> {
 
   try {
     const response = await getDrive().files.list({
-      q: `mimeType='application/vnd.google-apps.folder' and name='${dateFolderName}' and '${MAIN_FOLDER_ID}' in parents and trashed=false`,
+      q: `mimeType='application/vnd.google-apps.folder' and name='${escapeDriveQueryValue(dateFolderName)}' and '${MAIN_FOLDER_ID}' in parents and trashed=false`,
       fields: 'files(id, name)',
       spaces: 'drive',
       supportsAllDrives: true,
@@ -69,7 +118,7 @@ async function getOrCreateSubFolder(folderType: string): Promise<string> {
 
   try {
     const response = await getDrive().files.list({
-      q: `mimeType='application/vnd.google-apps.folder' and name='${folderName}' and '${MAIN_FOLDER_ID}' in parents and trashed=false`,
+      q: `mimeType='application/vnd.google-apps.folder' and name='${escapeDriveQueryValue(folderName)}' and '${MAIN_FOLDER_ID}' in parents and trashed=false`,
       fields: 'files(id, name)',
       spaces: 'drive',
       supportsAllDrives: true,
@@ -95,7 +144,8 @@ async function getOrCreateSubFolder(folderType: string): Promise<string> {
     return folder.data.id!;
   } catch (error) {
     console.error('Error creating/finding GDrive subfolder:', error);
-    throw new Error('Gagal menyiapkan folder Google Drive');
+    console.warn(`Falling back to main Google Drive folder for folder type ${folderType}`);
+    return MAIN_FOLDER_ID;
   }
 }
 
@@ -114,7 +164,6 @@ export async function uploadToGoogleDrive(
     const formattedName = `[${safeDivision}]_${safeUser}_${originalName}`;
 
     // Use fs.createReadStream instead of memory buffer
-    const fs = require('fs');
     const fileStream = fs.createReadStream(filePath);
 
     const fileMetadata = {
@@ -156,7 +205,6 @@ export async function uploadToGDrive(
     const timestamp = new Date().getTime();
     const formattedName = `${timestamp}_${originalName}`;
 
-    const fs = require('fs');
     const fileStream = fs.createReadStream(filePath);
 
     const fileMetadata = {

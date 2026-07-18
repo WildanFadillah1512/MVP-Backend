@@ -3,6 +3,10 @@ dist/
 uploads/
 .env
 google-credentials.json
+client_secret_*.json
+render-env-complete.txt
+run-oauth.ps1
+oauth-output.log
 *.log
 coverage/
 .DS_Store
