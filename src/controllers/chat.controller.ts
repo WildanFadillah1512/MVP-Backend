@@ -7,14 +7,11 @@ import { getIO } from '../socket';
 export const getGroups = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
+    const role = (req as any).user.role;
+    const canBypass = ['OWNER', 'CEO', 'ADMIN'].includes(role);
     
-    // User can see groups they are a member of
     const groups = await prisma.chatGroup.findMany({
-      where: {
-        members: {
-          some: { userId }
-        }
-      },
+      where: canBypass ? {} : { members: { some: { userId } } },
       include: {
         _count: {
           select: { members: true }
@@ -32,13 +29,15 @@ export const getMessages = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const userId = (req as any).user.id;
+    const role = (req as any).user.role;
+    const canBypass = ['OWNER', 'CEO', 'ADMIN'].includes(role);
 
     // Verify membership
     const isMember = await prisma.chatGroupMember.findUnique({
       where: { groupId_userId: { groupId: id, userId } }
     });
 
-    if (!isMember) {
+    if (!isMember && !canBypass) {
       return errorResponse(res, 'Anda tidak tergabung dalam grup ini', null, 403);
     }
 
@@ -61,13 +60,15 @@ export const sendMessage = async (req: Request, res: Response) => {
   try {
     const { id } = req.params; // Group ID
     const userId = (req as any).user.id;
+    const role = (req as any).user.role;
+    const canBypass = ['OWNER', 'CEO', 'ADMIN'].includes(role);
     const { content, fileUrl, fileName, fileType, fileSize } = req.body;
 
     const isMember = await prisma.chatGroupMember.findUnique({
       where: { groupId_userId: { groupId: id, userId } }
     });
 
-    if (!isMember) {
+    if (!isMember && !canBypass) {
       return errorResponse(res, 'Anda tidak tergabung dalam grup ini', null, 403);
     }
 
@@ -75,7 +76,7 @@ export const sendMessage = async (req: Request, res: Response) => {
       data: {
         groupId: id,
         senderId: userId,
-        content,
+        content: content?.trim() || fileName || 'Lampiran',
         fileUrl,
         fileName,
         fileType,

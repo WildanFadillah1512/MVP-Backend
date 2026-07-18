@@ -11,6 +11,7 @@ const FOLDER_TYPES: Record<string, string> = {
   'CHAT_ATTACHMENTS': 'Chat_Attachments',
   'PURCHASE_RECEIPTS': 'Purchase_Receipts',
   'PAYROLL_DOCS': 'Payroll_Documents',
+  'BACKUPS': 'Backups',
   'GENERAL': 'General_Files'
 };
 

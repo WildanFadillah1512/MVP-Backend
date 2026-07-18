@@ -1,0 +1,2 @@
+ALTER TABLE "Product"
+ADD COLUMN "recipeOutputQty" INTEGER NOT NULL DEFAULT 1;

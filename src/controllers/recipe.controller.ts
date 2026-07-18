@@ -3,10 +3,12 @@ import prisma from '../utils/prisma';
 import { errorResponse, successResponse } from '../utils/response';
 import { writeAuditLog } from '../utils/audit';
 
+const getUserRole = (user: any) => user.role?.name || user.role;
+
 // Get all recipes for a product
 export const getProductRecipes = async (req: Request, res: Response) => {
   try {
-    const { productId } = req.params;
+    const productId = String(req.params.productId);
 
     const recipes = await prisma.erpProductRecipe.findMany({
       where: { productId },
@@ -19,7 +21,7 @@ export const getProductRecipes = async (req: Request, res: Response) => {
 
     return successResponse(res, recipes, 'Product recipes retrieved successfully');
   } catch (error: any) {
-    return errorResponse(res, error.message, 500);
+    return errorResponse(res, error.message, null, 500);
   }
 };
 
@@ -49,14 +51,18 @@ export const getAllRecipes = async (req: Request, res: Response) => {
       acc[productId].ingredients.push({
         id: recipe.id,
         ingredient: recipe.ingredient,
-        qtyNeeded: recipe.qtyNeeded
+        qtyNeeded: recipe.qtyNeeded,
+        unitPrice: recipe.unitPrice,
+        totalPrice: recipe.qtyNeeded * recipe.unitPrice
       });
+      acc[productId].totalRecipeCost = (acc[productId].totalRecipeCost || 0) + (recipe.qtyNeeded * recipe.unitPrice);
+      acc[productId].costPerOutput = acc[productId].totalRecipeCost / Math.max(1, recipe.product.recipeOutputQty || 1);
       return acc;
     }, {});
 
     return successResponse(res, Object.values(grouped), 'All recipes retrieved successfully');
   } catch (error: any) {
-    return errorResponse(res, error.message, 500);
+    return errorResponse(res, error.message, null, 500);
   }
 };
 
@@ -64,19 +70,32 @@ export const getAllRecipes = async (req: Request, res: Response) => {
 export const setProductRecipe = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
+    const role = getUserRole(user);
 
     if (!['CEO', 'OWNER'].includes(role)) {
-      return errorResponse(res, 'Only CEO can set recipes', 403);
+      return errorResponse(res, 'Only CEO can set recipes', null, 403);
     }
 
-    const { productId, warehouseItemId, qtyNeeded } = req.body;
+    const { productId, warehouseItemId, qtyNeeded, outputQtyPerBatch, unitPrice } = req.body;
 
     if (!productId || !warehouseItemId || !qtyNeeded || qtyNeeded <= 0) {
-      return errorResponse(res, 'Invalid recipe data', 400);
+      return errorResponse(res, 'Invalid recipe data', null, 400);
     }
 
-    const recipe = await prisma.erpProductRecipe.upsert({
+    const recipe = await prisma.$transaction(async (tx) => {
+      if (outputQtyPerBatch !== undefined) {
+        const recipeOutputQty = Number(outputQtyPerBatch);
+        if (!Number.isFinite(recipeOutputQty) || recipeOutputQty <= 0) {
+          throw new Error('Jumlah hasil per batch harus lebih dari 0');
+        }
+
+        await tx.product.update({
+          where: { id: productId },
+          data: { recipeOutputQty: Math.floor(recipeOutputQty) }
+        });
+      }
+
+      return tx.erpProductRecipe.upsert({
       where: {
         productId_warehouseItemId: {
           productId,
@@ -84,24 +103,27 @@ export const setProductRecipe = async (req: Request, res: Response) => {
         }
       },
       update: {
-        qtyNeeded
+        qtyNeeded: Number(qtyNeeded),
+        unitPrice: Number(unitPrice || 0)
       },
       create: {
         productId,
         warehouseItemId,
-        qtyNeeded
+        qtyNeeded: Number(qtyNeeded),
+        unitPrice: Number(unitPrice || 0)
       },
       include: {
         product: true,
         ingredient: true
       }
+      });
     });
 
     await writeAuditLog(req, 'CREATE', 'RECIPE', `Recipe set for ${recipe.product.name}: ${recipe.qtyNeeded} ${recipe.ingredient.unit} of ${recipe.ingredient.name}`);
 
     return successResponse(res, recipe, 'Recipe set successfully', 201);
   } catch (error: any) {
-    return errorResponse(res, error.message, 500);
+    return errorResponse(res, error.message, null, 500);
   }
 };
 
@@ -109,20 +131,25 @@ export const setProductRecipe = async (req: Request, res: Response) => {
 export const setProductRecipeBulk = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
+    const role = getUserRole(user);
 
     if (!['CEO', 'OWNER'].includes(role)) {
-      return errorResponse(res, 'Only CEO can set recipes', 403);
+      return errorResponse(res, 'Only CEO can set recipes', null, 403);
     }
 
-    const { productId, ingredients } = req.body;
+    const { productId, ingredients, outputQtyPerBatch } = req.body;
     // ingredients: [{ warehouseItemId, qtyNeeded }]
 
     if (!productId || !ingredients || !Array.isArray(ingredients)) {
-      return errorResponse(res, 'Invalid recipe data', 400);
+      return errorResponse(res, 'Invalid recipe data', null, 400);
     }
 
     const recipes = await prisma.$transaction(async (tx) => {
+      const recipeOutputQty = Number(outputQtyPerBatch || 1);
+      if (!Number.isFinite(recipeOutputQty) || recipeOutputQty <= 0) {
+        throw new Error('Jumlah hasil per batch harus lebih dari 0');
+      }
+
       const results = [];
       for (const ing of ingredients) {
         const recipe = await tx.erpProductRecipe.upsert({
@@ -133,12 +160,14 @@ export const setProductRecipeBulk = async (req: Request, res: Response) => {
             }
           },
           update: {
-            qtyNeeded: ing.qtyNeeded
+            qtyNeeded: Number(ing.qtyNeeded),
+            unitPrice: Number(ing.unitPrice || 0)
           },
           create: {
             productId,
             warehouseItemId: ing.warehouseItemId,
-            qtyNeeded: ing.qtyNeeded
+            qtyNeeded: Number(ing.qtyNeeded),
+            unitPrice: Number(ing.unitPrice || 0)
           },
           include: {
             product: true,
@@ -147,6 +176,16 @@ export const setProductRecipeBulk = async (req: Request, res: Response) => {
         });
         results.push(recipe);
       }
+
+      const totalRecipeCost = results.reduce((sum, recipe) => sum + (recipe.qtyNeeded * recipe.unitPrice), 0);
+      await tx.product.update({
+        where: { id: productId },
+        data: {
+          recipeOutputQty: Math.floor(recipeOutputQty),
+          basePrice: totalRecipeCost / recipeOutputQty
+        }
+      });
+
       return results;
     });
 
@@ -154,7 +193,7 @@ export const setProductRecipeBulk = async (req: Request, res: Response) => {
 
     return successResponse(res, recipes, 'Recipes set successfully', 201);
   } catch (error: any) {
-    return errorResponse(res, error.message, 500);
+    return errorResponse(res, error.message, null, 500);
   }
 };
 
@@ -162,11 +201,11 @@ export const setProductRecipeBulk = async (req: Request, res: Response) => {
 export const deleteRecipeIngredient = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
-    const { id } = req.params;
+    const role = getUserRole(user);
+    const id = String(req.params.id);
 
     if (!['CEO', 'OWNER'].includes(role)) {
-      return errorResponse(res, 'Only CEO can delete recipe ingredients', 403);
+      return errorResponse(res, 'Only CEO can delete recipe ingredients', null, 403);
     }
 
     await prisma.erpProductRecipe.delete({
@@ -177,7 +216,7 @@ export const deleteRecipeIngredient = async (req: Request, res: Response) => {
 
     return successResponse(res, null, 'Recipe ingredient deleted successfully');
   } catch (error: any) {
-    return errorResponse(res, error.message, 500);
+    return errorResponse(res, error.message, null, 500);
   }
 };
 
@@ -187,7 +226,7 @@ export const calculateProduction = async (req: Request, res: Response) => {
     const { productId, batchCount } = req.query;
 
     if (!productId || !batchCount) {
-      return errorResponse(res, 'Product ID and batch count required', 400);
+      return errorResponse(res, 'Product ID and batch count required', null, 400);
     }
 
     const recipes = await prisma.erpProductRecipe.findMany({
@@ -199,13 +238,15 @@ export const calculateProduction = async (req: Request, res: Response) => {
     });
 
     if (recipes.length === 0) {
-      return errorResponse(res, 'No recipe found for this product', 404);
+      return errorResponse(res, 'No recipe found for this product', null, 404);
     }
 
     const batch = Number(batchCount);
     const materialsNeeded = recipes.map(recipe => ({
       ingredient: recipe.ingredient,
       qtyNeeded: recipe.qtyNeeded * batch,
+      unitPrice: recipe.unitPrice,
+      totalPrice: recipe.qtyNeeded * batch * recipe.unitPrice,
       currentStock: recipe.ingredient.currentStock,
       sufficient: recipe.ingredient.currentStock >= (recipe.qtyNeeded * batch),
       shortage: Math.max(0, (recipe.qtyNeeded * batch) - recipe.ingredient.currentStock)
@@ -216,12 +257,15 @@ export const calculateProduction = async (req: Request, res: Response) => {
     return successResponse(res, {
       product: recipes[0].product,
       batchCount: batch,
+      outputQty: batch * recipes[0].product.recipeOutputQty,
+      totalCost: materialsNeeded.reduce((sum, material) => sum + material.totalPrice, 0),
+      costPerOutput: materialsNeeded.reduce((sum, material) => sum + material.totalPrice, 0) / Math.max(1, batch * recipes[0].product.recipeOutputQty),
       materialsNeeded,
       canProduce,
       message: canProduce ? 'Semua bahan tersedia' : 'Ada bahan yang kurang'
     }, 'Production calculation completed');
   } catch (error: any) {
-    return errorResponse(res, error.message, 500);
+    return errorResponse(res, error.message, null, 500);
   }
 };
 
@@ -231,7 +275,7 @@ export const produceWithRecipe = async (req: Request, res: Response) => {
     const { productId, batchCount, date, notes } = req.body;
 
     if (!productId || !batchCount || batchCount <= 0) {
-      return errorResponse(res, 'Invalid production data', 400);
+      return errorResponse(res, 'Invalid production data', null, 400);
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -249,10 +293,11 @@ export const produceWithRecipe = async (req: Request, res: Response) => {
       }
 
       const batch = Number(batchCount);
+      const outputQty = batch * recipes[0].product.recipeOutputQty;
 
       // Check if all materials are sufficient
       for (const recipe of recipes) {
-        const needed = recipe.qtyNeeded * batch;
+        const needed = Math.ceil(recipe.qtyNeeded * batch);
         if (recipe.ingredient.currentStock < needed) {
           throw new Error(`Stok ${recipe.ingredient.name} tidak mencukupi. Butuh: ${needed}, Tersedia: ${recipe.ingredient.currentStock}`);
         }
@@ -260,7 +305,7 @@ export const produceWithRecipe = async (req: Request, res: Response) => {
 
       // Deduct materials
       for (const recipe of recipes) {
-        const qtyToDeduct = recipe.qtyNeeded * batch;
+        const qtyToDeduct = Math.ceil(recipe.qtyNeeded * batch);
         
         await tx.warehouseItem.update({
           where: { id: recipe.warehouseItemId },
@@ -286,10 +331,10 @@ export const produceWithRecipe = async (req: Request, res: Response) => {
       const productionRecord = await tx.productionRecord.create({
         data: {
           productId,
-          quantity: batch,
+          quantity: outputQty,
           rejectQty: 0,
           date: new Date(date || Date.now()),
-          notes: notes || `Produksi dengan resep (${batch} batch)`
+          notes: notes || `Produksi dengan resep (${batch} batch, hasil ${outputQty} unit)`
         },
         include: {
           product: true
@@ -301,9 +346,9 @@ export const produceWithRecipe = async (req: Request, res: Response) => {
         data: {
           productId,
           type: 'IN',
-          quantity: batch,
+          quantity: outputQty,
           reference: `PROD-${productionRecord.id}`,
-          notes: `Hasil produksi ${batch} unit`
+          notes: `Hasil produksi ${outputQty} unit dari ${batch} batch`
         }
       });
 
@@ -330,7 +375,7 @@ export const produceWithRecipe = async (req: Request, res: Response) => {
           },
           data: {
             actualQty: {
-              increment: batch
+              increment: outputQty
             }
           }
         });
@@ -343,6 +388,6 @@ export const produceWithRecipe = async (req: Request, res: Response) => {
 
     return successResponse(res, result, 'Production completed with automatic material deduction');
   } catch (error: any) {
-    return errorResponse(res, error.message, 500);
+    return errorResponse(res, error.message, null, 500);
   }
 };

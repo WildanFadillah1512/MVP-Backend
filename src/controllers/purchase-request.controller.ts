@@ -2,6 +2,10 @@ import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { errorResponse, successResponse } from '../utils/response';
 
+const getUserRole = (user: any) => user.role?.name || user.role;
+const getUserDivision = (user: any) => user.division?.name || user.division;
+const TOP_LEVEL_ROLES = ['OWNER', 'CEO', 'GM', 'ADMIN'];
+
 // Generate request number
 const generateRequestNumber = async () => {
   const count = await prisma.purchaseRequest.count();
@@ -13,7 +17,13 @@ const generateRequestNumber = async () => {
 export const createPurchaseRequest = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
+    const role = getUserRole(user);
+    const division = getUserDivision(user);
     const { warehouseItemId, requestedQty, priority, notes } = req.body;
+
+    if (!TOP_LEVEL_ROLES.includes(role) && division !== 'GUDANG') {
+      return errorResponse(res, 'Hanya divisi Gudang atau atasan yang dapat membuat purchase request', null, 403);
+    }
 
     const requestNumber = await generateRequestNumber();
 
@@ -42,7 +52,25 @@ export const createPurchaseRequest = async (req: Request, res: Response) => {
 export const submitToPurchasing = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const { id } = req.params;
+    const role = getUserRole(user);
+    const division = getUserDivision(user);
+    const id = String(req.params.id);
+
+    if (!TOP_LEVEL_ROLES.includes(role) && division !== 'GUDANG') {
+      return errorResponse(res, 'Hanya divisi Gudang atau atasan yang dapat submit ke Purchasing', null, 403);
+    }
+
+    const existing = await prisma.purchaseRequest.findUnique({
+      where: { id }
+    });
+
+    if (!existing) {
+      return errorResponse(res, 'Purchase request not found', null, 404);
+    }
+
+    if (!TOP_LEVEL_ROLES.includes(role) && existing.requestedById !== user.id) {
+      return errorResponse(res, 'Anda hanya dapat submit request yang dibuat sendiri', null, 403);
+    }
 
     const purchaseRequest = await prisma.purchaseRequest.update({
       where: { id },
@@ -56,15 +84,27 @@ export const submitToPurchasing = async (req: Request, res: Response) => {
     });
 
     // Create notification for purchasing staff
-    await prisma.notification.create({
-      data: {
-        userId: 'purchasing-staff-id', // TODO: Get purchasing staff dynamically
-        title: 'New Purchase Request',
-        message: `Purchase request ${purchaseRequest.requestNumber} submitted`,
-        type: 'INFO',
-        link: `/purchasing/requests/${id}`
-      }
+    const purchasingUsers = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        deletedAt: null,
+        division: { name: 'PURCHASING' },
+        role: { name: { in: ['STAFF', 'MANAGER', 'LEADER'] } }
+      },
+      select: { id: true }
     });
+
+    if (purchasingUsers.length > 0) {
+      await prisma.notification.createMany({
+        data: purchasingUsers.map((purchasingUser) => ({
+          userId: purchasingUser.id,
+          title: 'New Purchase Request',
+          message: `Purchase request ${purchaseRequest.requestNumber} submitted`,
+          type: 'INFO',
+          link: `/purchase-requests`
+        }))
+      });
+    }
 
     return successResponse(res, purchaseRequest, 'Purchase request submitted to purchasing');
   } catch (error: any) {
@@ -76,12 +116,13 @@ export const submitToPurchasing = async (req: Request, res: Response) => {
 export const setPriceAndSupplier = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
-    const { id } = req.params;
+    const role = getUserRole(user);
+    const division = getUserDivision(user);
+    const id = String(req.params.id);
     const { supplierId, estimatedBudget, actualPrice } = req.body;
 
-    if (role !== 'STAFF') {
-      return errorResponse(res, 'Only purchasing staff can set price', 403);
+    if (!(role === 'STAFF' && division === 'PURCHASING')) {
+      return errorResponse(res, 'Only purchasing staff can set price', null, 403);
     }
 
     // Get supplier prices for this item
@@ -91,7 +132,11 @@ export const setPriceAndSupplier = async (req: Request, res: Response) => {
     });
 
     if (!request) {
-      return errorResponse(res, 'Purchase request not found', 404);
+      return errorResponse(res, 'Purchase request not found', null, 404);
+    }
+
+    if (request.status !== 'SUBMITTED_BY_WAREHOUSE') {
+      return errorResponse(res, 'Harga hanya dapat diset setelah request disubmit Gudang', null, 400);
     }
 
     const purchaseRequest = await prisma.purchaseRequest.update({
@@ -114,7 +159,7 @@ export const setPriceAndSupplier = async (req: Request, res: Response) => {
     const manager = await prisma.user.findFirst({
       where: {
         role: { name: 'MANAGER' },
-        division: user.division
+        division: { name: division }
       }
     });
 
@@ -125,7 +170,7 @@ export const setPriceAndSupplier = async (req: Request, res: Response) => {
           title: 'Purchase Request for Approval',
           message: `Purchase request ${purchaseRequest.requestNumber} needs manager approval`,
           type: 'INFO',
-          link: `/purchasing/requests/${id}`
+          link: `/purchase-requests`
         }
       });
     }
@@ -140,11 +185,20 @@ export const setPriceAndSupplier = async (req: Request, res: Response) => {
 export const managerApprove = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
-    const { id } = req.params;
+    const role = getUserRole(user);
+    const division = getUserDivision(user);
+    const id = String(req.params.id);
 
-    if (role !== 'MANAGER') {
-      return errorResponse(res, 'Only manager can approve', 403);
+    if (!(role === 'MANAGER' && division === 'PURCHASING')) {
+      return errorResponse(res, 'Only manager can approve', null, 403);
+    }
+
+    const existing = await prisma.purchaseRequest.findUnique({ where: { id } });
+    if (!existing) {
+      return errorResponse(res, 'Purchase request not found', null, 404);
+    }
+    if (existing.status !== 'PENDING_MANAGER') {
+      return errorResponse(res, 'Request belum berada di tahap approval manager', null, 400);
     }
 
     const purchaseRequest = await prisma.purchaseRequest.update({
@@ -174,7 +228,7 @@ export const managerApprove = async (req: Request, res: Response) => {
           title: 'Purchase Request for Final Approval',
           message: `Purchase request ${purchaseRequest.requestNumber} needs CEO approval`,
           type: 'INFO',
-          link: `/purchasing/requests/${id}`
+          link: `/purchase-requests`
         }
       });
     }
@@ -189,11 +243,19 @@ export const managerApprove = async (req: Request, res: Response) => {
 export const ceoApprove = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
-    const { id } = req.params;
+    const role = getUserRole(user);
+    const id = String(req.params.id);
 
     if (!['CEO', 'OWNER'].includes(role)) {
-      return errorResponse(res, 'Only CEO can give final approval', 403);
+      return errorResponse(res, 'Only CEO can give final approval', null, 403);
+    }
+
+    const existing = await prisma.purchaseRequest.findUnique({ where: { id } });
+    if (!existing) {
+      return errorResponse(res, 'Purchase request not found', null, 404);
+    }
+    if (existing.status !== 'PENDING_CEO') {
+      return errorResponse(res, 'Request belum berada di tahap approval CEO', null, 400);
     }
 
     const purchaseRequest = await prisma.purchaseRequest.update({
@@ -217,7 +279,7 @@ export const ceoApprove = async (req: Request, res: Response) => {
           title: 'Purchase Request Approved',
           message: `Purchase request ${purchaseRequest.requestNumber} approved by CEO`,
           type: 'INFO',
-          link: `/purchasing/requests/${id}`
+          link: `/purchase-requests`
         }
       });
     }
@@ -232,12 +294,12 @@ export const ceoApprove = async (req: Request, res: Response) => {
 export const rejectPurchaseRequest = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
-    const { id } = req.params;
+    const role = getUserRole(user);
+    const id = String(req.params.id);
     const { rejectReason } = req.body;
 
     if (!['MANAGER', 'CEO', 'OWNER'].includes(role)) {
-      return errorResponse(res, 'Unauthorized to reject request', 403);
+      return errorResponse(res, 'Unauthorized to reject request', null, 403);
     }
 
     const purchaseRequest = await prisma.purchaseRequest.update({
@@ -258,7 +320,7 @@ export const rejectPurchaseRequest = async (req: Request, res: Response) => {
         title: 'Purchase Request Rejected',
         message: `Purchase request ${purchaseRequest.requestNumber} was rejected`,
         type: 'WARNING',
-        link: `/purchasing/requests/${id}`
+        link: `/purchase-requests`
       }
     });
 
@@ -272,14 +334,29 @@ export const rejectPurchaseRequest = async (req: Request, res: Response) => {
 export const markAsPurchased = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const { id } = req.params;
+    const role = getUserRole(user);
+    const division = getUserDivision(user);
+    const id = String(req.params.id);
     const { actualQty, actualPrice, receiptUrl } = req.body;
+
+    if (!TOP_LEVEL_ROLES.includes(role) && division !== 'PURCHASING') {
+      return errorResponse(res, 'Hanya Purchasing atau atasan yang dapat menandai pembelian selesai', null, 403);
+    }
+
+    const existing = await prisma.purchaseRequest.findUnique({ where: { id } });
+    if (!existing) {
+      return errorResponse(res, 'Purchase request not found', null, 404);
+    }
+    if (existing.status !== 'APPROVED') {
+      return errorResponse(res, 'Request harus disetujui CEO sebelum ditandai sudah dibeli', null, 400);
+    }
+    const purchasedQty = Number(actualQty || existing.requestedQty);
 
     const purchaseRequest = await prisma.purchaseRequest.update({
       where: { id },
       data: {
-        actualQty: actualQty,
-        actualPrice: actualPrice,
+        actualQty: purchasedQty,
+        actualPrice: Number(actualPrice || 0),
         receiptUrl,
         status: 'PURCHASED',
         purchasedAt: new Date()
@@ -295,7 +372,7 @@ export const markAsPurchased = async (req: Request, res: Response) => {
       where: { id: purchaseRequest.warehouseItemId },
       data: {
         currentStock: {
-          increment: actualQty || purchaseRequest.requestedQty
+          increment: purchasedQty
         }
       }
     });
@@ -305,8 +382,8 @@ export const markAsPurchased = async (req: Request, res: Response) => {
       data: {
         warehouseItemId: purchaseRequest.warehouseItemId,
         type: 'IN',
-        quantity: actualQty || purchaseRequest.requestedQty,
-        notes: `Purchase from ${purchaseRequest.supplier?.name} - ${purchaseRequest.requestNumber}`,
+        quantity: purchasedQty,
+        notes: `Purchase from ${(purchaseRequest as any).supplier?.name || 'supplier'} - ${purchaseRequest.requestNumber}`,
         date: new Date()
       }
     });
@@ -321,22 +398,32 @@ export const markAsPurchased = async (req: Request, res: Response) => {
 export const getPurchaseRequests = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
+    const role = getUserRole(user);
+    const division = getUserDivision(user);
     const { status, startDate, endDate } = req.query;
 
     let whereClause: any = {};
 
-    // Staff purchasing hanya lihat yang assigned ke dia
-    if (role === 'STAFF') {
+    if (TOP_LEVEL_ROLES.includes(role)) {
+      whereClause = {};
+    } else if (role === 'STAFF' && division === 'PURCHASING') {
+      // Staff purchasing hanya lihat request baru dan yang sudah diproses dia.
       whereClause.OR = [
         { staffId: user.id },
         { status: 'SUBMITTED_BY_WAREHOUSE' }
       ];
-    }
-
-    // Warehouse staff hanya lihat yang dia buat
-    if (role === 'STAFF' && user.division.name === 'WAREHOUSE') {
+    } else if (role === 'STAFF' && division === 'GUDANG') {
+      // Warehouse staff hanya lihat yang dia buat.
       whereClause = { requestedById: user.id };
+    } else if (role === 'MANAGER' && division === 'PURCHASING') {
+      whereClause = {
+        OR: [
+          { status: 'PENDING_MANAGER' },
+          { managerId: user.id }
+        ]
+      };
+    } else {
+      whereClause = { id: '__no_access__' };
     }
 
     if (status) {
@@ -368,7 +455,7 @@ export const getPurchaseRequests = async (req: Request, res: Response) => {
 // Get single purchase request
 export const getPurchaseRequestById = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params.id);
 
     const request = await prisma.purchaseRequest.findUnique({
       where: { id },
@@ -385,7 +472,7 @@ export const getPurchaseRequestById = async (req: Request, res: Response) => {
     });
 
     if (!request) {
-      return errorResponse(res, 'Purchase request not found', 404);
+      return errorResponse(res, 'Purchase request not found', null, 404);
     }
 
     return successResponse(res, request, 'Purchase request retrieved successfully');
@@ -397,7 +484,7 @@ export const getPurchaseRequestById = async (req: Request, res: Response) => {
 // Get supplier options for an item
 export const getSupplierOptionsForItem = async (req: Request, res: Response) => {
   try {
-    const { warehouseItemId } = req.params;
+    const warehouseItemId = String(req.params.warehouseItemId);
 
     const supplierPrices = await prisma.supplierPrice.findMany({
       where: {

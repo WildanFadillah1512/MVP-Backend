@@ -80,6 +80,7 @@ model User {
   name       String
   roleId     String
   divisionId String
+  branchId   String?
   isActive   Boolean @default(true)
 
   // New fields for profile
@@ -89,6 +90,7 @@ model User {
 
   role     Role     @relation(fields: [roleId], references: [id])
   division Division @relation(fields: [divisionId], references: [id])
+  branch   Branch?  @relation(fields: [branchId], references: [id])
 
   // Hierarchy
   supervisorId String?
@@ -117,10 +119,18 @@ model User {
   // Paklaring (Work Certificate)
   paklaringIssued   Paklaring[] @relation("PaklaringIssuer")
   paklaringReceived Paklaring[] @relation("PaklaringEmployee")
+  payrolls          Payroll[]
+  resignationRequests ResignationRequest[]
+  warningLettersReceived WarningLetter[] @relation("WarningLetterEmployee")
+  warningLettersIssued WarningLetter[] @relation("WarningLetterIssuer")
+  materialRequestsCreated MaterialRequest[] @relation("MaterialRequestRequester")
+  materialRequestsHandled MaterialRequest[] @relation("MaterialRequestHandler")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  @@index([branchId])
 }
 
 // -----------------------------------------
@@ -248,6 +258,7 @@ model Product {
   name      String
   category  String
   basePrice Float  @default(0) // Phase 2 HPP Prep
+  recipeOutputQty Int @default(1) // Finished goods produced by 1 recipe batch/adonan
 
   productionRecords ProductionRecord[]
   productionTargets ProductionTarget[]
@@ -346,6 +357,28 @@ model Supplier {
   @@index([status])
 }
 
+model MaterialRequest {
+  id              String        @id @default(uuid())
+  requestedById   String
+  requestedBy     User          @relation("MaterialRequestRequester", fields: [requestedById], references: [id])
+  handledById     String?
+  handledBy       User?         @relation("MaterialRequestHandler", fields: [handledById], references: [id])
+  warehouseItemId String
+  item            WarehouseItem @relation(fields: [warehouseItemId], references: [id])
+  quantity        Int
+  purpose         String
+  status          String        @default("PENDING")
+  notes           String?
+  handledAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([warehouseItemId])
+  @@index([requestedById])
+}
+
 model SupplierPrice {
   id              String   @id @default(uuid())
   supplierId      String
@@ -442,9 +475,49 @@ model Branch {
   address String?
 
   cashierReports CashierReport[]
+  users User[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model ResignationRequest {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+  reason         String
+  effectiveDate  DateTime @db.Date
+  status         String   @default("SUBMITTED")
+  backupSnapshot String?
+  reviewedById   String?
+  reviewedAt     DateTime?
+  notes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+model WarningLetter {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   User     @relation("WarningLetterEmployee", fields: [employeeId], references: [id])
+  issuedById String
+  issuedBy   User     @relation("WarningLetterIssuer", fields: [issuedById], references: [id])
+  type       String   @default("SP1")
+  reason     String
+  issuedAt   DateTime @default(now())
+  expiresAt  DateTime
+  status     String   @default("ACTIVE")
+  notes      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId, status])
+  @@index([expiresAt])
 }
 
 model CashierReport {
@@ -457,6 +530,7 @@ model CashierReport {
   totalQris     Float    @default(0)
   totalExpense  Float    @default(0)
   netTotal      Float    @default(0)
+  depositProofUrl String?
   notes         String?
 
   createdAt DateTime @default(now())
@@ -475,11 +549,13 @@ model WarehouseItem {
   minStock     Int    @default(10)
   currentStock Int    @default(0)
   unit         String
+  isActive     Boolean @default(true)
 
   movements WarehouseMovement[]
   recipes   ErpProductRecipe[]
   supplierPrices SupplierPrice[]
   purchaseRequests PurchaseRequest[]
+  materialRequests MaterialRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -627,6 +703,7 @@ model ErpProductRecipe {
   warehouseItemId String
   ingredient      WarehouseItem @relation(fields: [warehouseItemId], references: [id])
   qtyNeeded       Float
+  unitPrice       Float         @default(0)
 
   createdAt DateTime @default(now())
 
@@ -844,6 +921,7 @@ enum PayrollStatus {
 model Payroll {
   id              String        @id @default(uuid())
   userId          String
+  user            User          @relation(fields: [userId], references: [id])
   period          DateTime      @db.Date // YYYY-MM-01
   
   // Komponen Gaji

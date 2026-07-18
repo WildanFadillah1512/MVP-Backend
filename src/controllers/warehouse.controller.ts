@@ -7,6 +7,7 @@ import { StockMovementType } from '@prisma/client';
 export const getItems = async (req: Request, res: Response) => {
   try {
     const items = await prisma.warehouseItem.findMany({
+      where: { isActive: true },
       orderBy: { name: 'asc' }
     });
     return successResponse(res, items, 'Data gudang berhasil diambil');
@@ -60,9 +61,14 @@ export const createMovement = async (req: Request, res: Response) => {
     const qty = Number(quantity);
 
     const result = await prisma.$transaction(async (tx) => {
+      if (!warehouseItemId || !Number.isFinite(qty) || qty <= 0) {
+        throw new Error('Barang dan jumlah yang valid wajib diisi');
+      }
+
+      const item = await tx.warehouseItem.findFirst({ where: { id: warehouseItemId, isActive: true } });
+      if (!item) throw new Error('Barang tidak ditemukan');
+
       if (type === 'OUT') {
-        const item = await tx.warehouseItem.findUnique({ where: { id: warehouseItemId } });
-        if (!item) throw new Error('Barang tidak ditemukan');
         if (item.currentStock < qty) throw new Error(`Stok ${item.name} tidak cukup. Sisa: ${item.currentStock}`);
       }
 
@@ -109,7 +115,10 @@ export const getMovements = async (req: Request, res: Response) => {
 export const getLowStockRecommendations = async (req: Request, res: Response) => {
   try {
     // Filter in-memory since Prisma can't compare two columns directly without raw SQL
-    const all = await prisma.warehouseItem.findMany({ orderBy: { currentStock: 'asc' } });
+    const all = await prisma.warehouseItem.findMany({
+      where: { isActive: true },
+      orderBy: { currentStock: 'asc' }
+    });
     const filtered = all.filter(i => i.currentStock <= i.minStock);
     const recommendations = filtered.map(item => ({
       ...item,
@@ -119,5 +128,36 @@ export const getLowStockRecommendations = async (req: Request, res: Response) =>
     return successResponse(res, recommendations, 'Rekomendasi belanja berhasil diambil');
   } catch (error) {
     return errorResponse(res, 'Gagal mengambil rekomendasi', null, 500);
+  }
+};
+
+export const deleteItem = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const role = user.role?.name || user.role;
+    const division = user.division?.name || user.division;
+    const id = String(req.params.id);
+
+    if (role !== 'CEO' && division !== 'PURCHASING') {
+      return errorResponse(res, 'Hanya Purchasing dan CEO yang boleh menghapus barang gudang', null, 403);
+    }
+
+    const item = await prisma.warehouseItem.findFirst({
+      where: { id, isActive: true }
+    });
+
+    if (!item) {
+      return errorResponse(res, 'Barang tidak ditemukan', null, 404);
+    }
+
+    const updated = await prisma.warehouseItem.update({
+      where: { id },
+      data: { isActive: false }
+    });
+
+    await writeAuditLog(req, 'DELETE', 'WAREHOUSE_ITEM', `Master barang gudang dinonaktifkan: ${item.name}`);
+    return successResponse(res, updated, 'Barang gudang berhasil dihapus dari daftar aktif');
+  } catch (error: any) {
+    return errorResponse(res, error.message || 'Gagal menghapus barang gudang', null, 500);
   }
 };

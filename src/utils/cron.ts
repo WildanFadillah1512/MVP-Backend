@@ -3,6 +3,9 @@ import prisma from './prisma';
 import { ReportStatus, AttendanceStatus } from '@prisma/client';
 import { generateSystemWarnings } from '../controllers/notification.controller';
 import { createBulkNotifications } from '../services/notification.service';
+import { uploadToGDrive } from '../services/gdrive.service';
+import fs from 'fs/promises';
+import path from 'path';
 
 export const setupCronJobs = () => {
   // Lock daily reports that haven't been submitted after 24 hours
@@ -90,6 +93,30 @@ export const setupCronJobs = () => {
   cron.schedule('0 9 * * *', async () => {
     console.log('[CRON] Checking late cashier reports...');
     await checkLateCashierReports();
+  });
+
+  // Remind cashiers every 2 days to upload deposit proof
+  cron.schedule('30 9 */2 * *', async () => {
+    console.log('[CRON] Checking cashier deposit proof reminders...');
+    await checkCashierDepositProofs();
+  });
+
+  // Expire SP1 letters every day shortly after midnight
+  cron.schedule('15 0 * * *', async () => {
+    console.log('[CRON] Expiring old SP1 records...');
+    await expireWarningLetters();
+  });
+
+  // Remind assignees about tasks due within 24 hours
+  cron.schedule('0 8 * * *', async () => {
+    console.log('[CRON] Checking task deadline reminders...');
+    await remindTaskDeadlines();
+  });
+
+  // Monthly JSON backup for core operational data
+  cron.schedule('30 1 1 * *', async () => {
+    console.log('[CRON] Running monthly backup...');
+    await createMonthlyBackup();
   });
 };
 
@@ -319,5 +346,147 @@ async function checkLateCashierReports() {
     console.log(`[CRON] Sent ${notifications.length} late cashier report warnings`);
   } catch (error) {
     console.error('[CRON] Error checking late cashier reports:', error);
+  }
+}
+
+async function checkCashierDepositProofs() {
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - 2);
+    since.setHours(0, 0, 0, 0);
+
+    const branches = await prisma.branch.findMany();
+    const missingBranches = [];
+
+    for (const branch of branches) {
+      const latestReport = await prisma.cashierReport.findFirst({
+        where: {
+          branchId: branch.id,
+          date: { gte: since }
+        },
+        orderBy: { date: 'desc' }
+      });
+
+      if (!latestReport || !latestReport.depositProofUrl) {
+        missingBranches.push(branch);
+      }
+    }
+
+    if (missingBranches.length === 0) {
+      console.log('[CRON] No cashier deposit proof reminders needed');
+      return;
+    }
+
+    const targetUsers = await prisma.user.findMany({
+      where: {
+        OR: [
+          { division: { name: 'KASIR' } },
+          { role: { name: { in: ['CEO', 'OWNER', 'ADMIN'] as any } } }
+        ],
+        isActive: true,
+        deletedAt: null
+      },
+      select: { id: true }
+    });
+
+    const branchNames = missingBranches.map((branch) => branch.name).join(', ');
+    await createBulkNotifications(targetUsers.map((user) => ({
+      userId: user.id,
+      title: 'Reminder Bukti Setoran',
+      message: `Cabang berikut belum lengkap laporan/bukti setoran 2 hari terakhir: ${branchNames}.`,
+      type: 'WARNING',
+      link: '/cashier',
+      metadata: { branches: missingBranches.map((branch) => branch.id), since: since.toISOString() }
+    })));
+
+    console.log(`[CRON] Sent cashier deposit proof reminders for ${missingBranches.length} branches`);
+  } catch (error) {
+    console.error('[CRON] Error checking cashier deposit proofs:', error);
+  }
+}
+
+async function expireWarningLetters() {
+  try {
+    const result = await prisma.warningLetter.deleteMany({
+      where: {
+        expiresAt: { lt: new Date() }
+      }
+    });
+
+    console.log(`[CRON] Deleted ${result.count} expired SP1 records`);
+  } catch (error) {
+    console.error('[CRON] Error expiring SP1 records:', error);
+  }
+}
+
+async function remindTaskDeadlines() {
+  try {
+    const now = new Date();
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const tasks = await prisma.task.findMany({
+      where: {
+        status: { notIn: ['COMPLETED', 'CANCELLED'] },
+        dueDate: { gte: now, lte: tomorrow }
+      }
+    });
+
+    if (tasks.length === 0) {
+      console.log('[CRON] No task reminders needed');
+      return;
+    }
+
+    await createBulkNotifications(tasks.map((task) => ({
+      userId: task.assignedTo,
+      title: 'Deadline Tugas Dekat',
+      message: `Tugas "${task.title}" mendekati deadline.`,
+      type: 'TASK',
+      link: '/tasks',
+      metadata: { taskId: task.id, dueDate: task.dueDate?.toISOString() }
+    })));
+
+    console.log(`[CRON] Sent ${tasks.length} task deadline reminders`);
+  } catch (error) {
+    console.error('[CRON] Error checking task reminders:', error);
+  }
+}
+
+async function createMonthlyBackup() {
+  try {
+    const backupDir = path.resolve(process.cwd(), 'backups');
+    await fs.mkdir(backupDir, { recursive: true });
+
+    const now = new Date();
+    const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const data = {
+      generatedAt: now.toISOString(),
+      users: await prisma.user.findMany({
+        include: { role: true, division: true, branch: true },
+        orderBy: { createdAt: 'desc' }
+      }),
+      warehouseItems: await prisma.warehouseItem.findMany(),
+      warehouseMovements: await prisma.warehouseMovement.findMany({ orderBy: { date: 'desc' }, take: 1000 }),
+      products: await prisma.product.findMany({ include: { recipes: true } }),
+      purchaseRequests: await prisma.purchaseRequest.findMany({ orderBy: { createdAt: 'desc' }, take: 1000 }),
+      cashierReports: await prisma.cashierReport.findMany({ orderBy: { date: 'desc' }, take: 1000 }),
+      payrolls: await prisma.payroll.findMany({ orderBy: { period: 'desc' }, take: 1000 }),
+      warningLetters: await prisma.warningLetter.findMany({ orderBy: { createdAt: 'desc' } }),
+      resignationRequests: await prisma.resignationRequest.findMany({ orderBy: { createdAt: 'desc' } })
+    };
+
+    const backupPath = path.join(backupDir, `monthly-backup-${stamp}.json`);
+    await fs.writeFile(backupPath, JSON.stringify(data, null, 2), 'utf8');
+
+    try {
+      const driveUrl = await uploadToGDrive(backupPath, `monthly-backup-${stamp}.json`, 'BACKUPS');
+      console.log(`[CRON] Monthly backup uploaded to Google Drive: ${driveUrl}`);
+    } catch (uploadError) {
+      console.error('[CRON] Monthly backup created locally but Google Drive upload failed:', uploadError);
+    }
+
+    console.log(`[CRON] Monthly backup created for ${stamp}`);
+  } catch (error) {
+    console.error('[CRON] Error creating monthly backup:', error);
   }
 }

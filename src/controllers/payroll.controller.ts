@@ -3,10 +3,12 @@ import prisma from '../utils/prisma';
 import { errorResponse, successResponse } from '../utils/response';
 import { startOfMonth, endOfMonth } from 'date-fns';
 
+const getUserRole = (user: any) => user.role?.name || user.role;
+
 export const getPayrolls = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
+    const role = getUserRole(user);
     const { period, userId, status } = req.query;
 
     let whereClause: any = {};
@@ -54,8 +56,8 @@ export const getPayrolls = async (req: Request, res: Response) => {
 export const getPayrollById = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
-    const { id } = req.params;
+    const role = getUserRole(user);
+    const id = String(req.params.id);
 
     const payroll = await prisma.payroll.findUnique({
       where: { id },
@@ -73,12 +75,12 @@ export const getPayrollById = async (req: Request, res: Response) => {
     });
 
     if (!payroll) {
-      return errorResponse(res, 'Payroll not found', 404);
+      return errorResponse(res, 'Payroll not found', null, 404);
     }
 
     // Staff hanya bisa lihat slip gaji sendiri
     if (role === 'STAFF' && payroll.userId !== user.id) {
-      return errorResponse(res, 'Unauthorized to view this payroll', 403);
+      return errorResponse(res, 'Unauthorized to view this payroll', null, 403);
     }
 
     return successResponse(res, payroll, 'Payroll retrieved successfully');
@@ -90,10 +92,10 @@ export const getPayrollById = async (req: Request, res: Response) => {
 export const generatePayroll = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
+    const role = getUserRole(user);
 
     if (!['CEO', 'OWNER', 'ADMIN', 'MANAGER'].includes(role)) {
-      return errorResponse(res, 'Unauthorized to generate payroll', 403);
+      return errorResponse(res, 'Unauthorized to generate payroll', null, 403);
     }
 
     const { userId, period, basicSalary, allowances, bonus, deductions } = req.body;
@@ -209,11 +211,11 @@ export const generatePayroll = async (req: Request, res: Response) => {
 export const approvePayroll = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
-    const { id } = req.params;
+    const role = getUserRole(user);
+    const id = String(req.params.id);
 
     if (!['CEO', 'OWNER'].includes(role)) {
-      return errorResponse(res, 'Only CEO can approve payroll', 403);
+      return errorResponse(res, 'Only CEO can approve payroll', null, 403);
     }
 
     const payroll = await prisma.payroll.update({
@@ -243,11 +245,11 @@ export const approvePayroll = async (req: Request, res: Response) => {
 export const markPayrollAsPaid = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
-    const { id } = req.params;
+    const role = getUserRole(user);
+    const id = String(req.params.id);
 
     if (!['CEO', 'OWNER', 'ADMIN'].includes(role)) {
-      return errorResponse(res, 'Unauthorized to mark payroll as paid', 403);
+      return errorResponse(res, 'Unauthorized to mark payroll as paid', null, 403);
     }
 
     const payroll = await prisma.payroll.update({
@@ -267,11 +269,11 @@ export const markPayrollAsPaid = async (req: Request, res: Response) => {
 export const updatePayroll = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
-    const { id } = req.params;
+    const role = getUserRole(user);
+    const id = String(req.params.id);
 
     if (!['CEO', 'OWNER', 'ADMIN', 'MANAGER'].includes(role)) {
-      return errorResponse(res, 'Unauthorized to update payroll', 403);
+      return errorResponse(res, 'Unauthorized to update payroll', null, 403);
     }
 
     const { basicSalary, allowances, bonus, deductions, notes } = req.body;
@@ -281,11 +283,11 @@ export const updatePayroll = async (req: Request, res: Response) => {
     });
 
     if (!payroll) {
-      return errorResponse(res, 'Payroll not found', 404);
+      return errorResponse(res, 'Payroll not found', null, 404);
     }
 
     if (payroll.status === 'PAID') {
-      return errorResponse(res, 'Cannot update paid payroll', 400);
+      return errorResponse(res, 'Cannot update paid payroll', null, 400);
     }
 
     const totalSalary = (basicSalary || payroll.basicSalary) + 
@@ -315,11 +317,11 @@ export const updatePayroll = async (req: Request, res: Response) => {
 export const deletePayroll = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
-    const { id } = req.params;
+    const role = getUserRole(user);
+    const id = String(req.params.id);
 
     if (!['CEO', 'OWNER'].includes(role)) {
-      return errorResponse(res, 'Only CEO can delete payroll', 403);
+      return errorResponse(res, 'Only CEO can delete payroll', null, 403);
     }
 
     const payroll = await prisma.payroll.findUnique({
@@ -327,11 +329,11 @@ export const deletePayroll = async (req: Request, res: Response) => {
     });
 
     if (!payroll) {
-      return errorResponse(res, 'Payroll not found', 404);
+      return errorResponse(res, 'Payroll not found', null, 404);
     }
 
     if (payroll.status === 'PAID') {
-      return errorResponse(res, 'Cannot delete paid payroll', 400);
+      return errorResponse(res, 'Cannot delete paid payroll', null, 400);
     }
 
     await prisma.payroll.delete({

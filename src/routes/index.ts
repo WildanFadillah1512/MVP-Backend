@@ -24,6 +24,7 @@ import payrollRoutes from './payroll.routes';
 import purchaseRequestRoutes from './purchase-request.routes';
 import recipeRoutes from './recipe.routes';
 import fileUploadRoutes from './file-upload.routes';
+import materialRequestRoutes from './material-request.routes';
 
 const router = Router();
 
@@ -52,5 +53,6 @@ router.use('/overtime', overtimeRoutes);
 router.use('/paklaring', paklaringRoutes);
 router.use('/payroll', payrollRoutes);
 router.use('/file-upload', fileUploadRoutes);
+router.use('/material-requests', materialRequestRoutes);
 
 export default router;

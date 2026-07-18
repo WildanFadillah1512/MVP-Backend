@@ -16,7 +16,7 @@ export const getBranches = async (req: Request, res: Response) => {
 
 export const createCashierReport = async (req: Request, res: Response) => {
   try {
-    const { branchId, date, totalCash, totalTransfer, totalQris, totalExpense, notes, productsSold } = req.body;
+    const { branchId, date, totalCash, totalTransfer, totalQris, totalExpense, depositProofUrl, notes, productsSold } = req.body;
     
     const cash = Number(totalCash) || 0;
     const transfer = Number(totalTransfer) || 0;
@@ -35,6 +35,7 @@ export const createCashierReport = async (req: Request, res: Response) => {
           totalQris: qris,
           totalExpense: expense,
           netTotal,
+          depositProofUrl: depositProofUrl || null,
           notes
         }
       });

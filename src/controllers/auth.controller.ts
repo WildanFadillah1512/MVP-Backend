@@ -11,7 +11,7 @@ export const login = async (req: Request, res: Response) => {
 
     const user = await prisma.user.findUnique({
       where: { email },
-      include: { role: true, division: true },
+      include: { role: true, division: true, branch: true },
     });
 
     if (!user || !user.isActive || user.deletedAt) {
@@ -55,7 +55,7 @@ export const getMe = async (req: Request, res: Response) => {
     const userId = (req as any).user.id;
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      include: { role: true, division: true },
+      include: { role: true, division: true, branch: true },
     });
     if (!user) return errorResponse(res, 'User tidak ditemukan', null, 404);
     const { password: _, ...userWithoutPassword } = user;

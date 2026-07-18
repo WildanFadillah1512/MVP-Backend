@@ -2,10 +2,12 @@ import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { errorResponse, successResponse } from '../utils/response';
 
+const getUserRole = (user: any) => user.role?.name || user.role;
+
 export const getSuppliers = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
+    const role = getUserRole(user);
 
     let whereClause: any = {};
     
@@ -37,11 +39,11 @@ export const getSuppliers = async (req: Request, res: Response) => {
 export const createSupplier = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
+    const role = getUserRole(user);
 
     // Only MANAGER and CEO can create suppliers
     if (!['MANAGER', 'CEO', 'OWNER', 'GM'].includes(role)) {
-      return errorResponse(res, 'Unauthorized to create supplier', 403);
+      return errorResponse(res, 'Unauthorized to create supplier', null, 403);
     }
 
     const { code, name, contactName, phone, email, address } = req.body;
@@ -72,11 +74,11 @@ export const createSupplier = async (req: Request, res: Response) => {
 export const approveSupplier = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
-    const { id } = req.params;
+    const role = getUserRole(user);
+    const id = String(req.params.id);
 
     if (!['MANAGER', 'CEO', 'OWNER', 'GM'].includes(role)) {
-      return errorResponse(res, 'Unauthorized to approve supplier', 403);
+      return errorResponse(res, 'Unauthorized to approve supplier', null, 403);
     }
 
     const supplier = await prisma.supplier.update({
@@ -97,11 +99,11 @@ export const approveSupplier = async (req: Request, res: Response) => {
 export const setSupplierPrice = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
+    const role = getUserRole(user);
 
     // Only CEO can set supplier prices
     if (!['CEO', 'OWNER'].includes(role)) {
-      return errorResponse(res, 'Only CEO can set supplier prices', 403);
+      return errorResponse(res, 'Only CEO can set supplier prices', null, 403);
     }
 
     const { supplierId, warehouseItemId, unitPrice } = req.body;
@@ -163,11 +165,11 @@ export const getSupplierPrices = async (req: Request, res: Response) => {
 export const updateSupplier = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
-    const { id } = req.params;
+    const role = getUserRole(user);
+    const id = String(req.params.id);
 
     if (!['MANAGER', 'CEO', 'OWNER', 'GM'].includes(role)) {
-      return errorResponse(res, 'Unauthorized to update supplier', 403);
+      return errorResponse(res, 'Unauthorized to update supplier', null, 403);
     }
 
     const { name, contactName, phone, email, address, status } = req.body;
@@ -193,11 +195,11 @@ export const updateSupplier = async (req: Request, res: Response) => {
 export const deleteSupplier = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const role = user.role.name;
-    const { id } = req.params;
+    const role = getUserRole(user);
+    const id = String(req.params.id);
 
     if (!['CEO', 'OWNER'].includes(role)) {
-      return errorResponse(res, 'Only CEO can delete suppliers', 403);
+      return errorResponse(res, 'Only CEO can delete suppliers', null, 403);
     }
 
     await prisma.supplier.update({

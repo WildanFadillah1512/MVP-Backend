@@ -3,11 +3,15 @@ import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { successResponse, errorResponse } from '../utils/response';
 import { writeAuditLog } from '../utils/audit';
+import { createNotification } from '../services/notification.service';
+
+const getUserRole = (user: any) => user.role?.name || user.role;
 
 export const getTasks = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.id;
-    const role = (req as any).user.role;
+    const user = (req as any).user;
+    const userId = user.id;
+    const role = getUserRole(user);
     
     // CEO/OWNER/ADMIN/GM see all tasks. Manager sees tasks they assigned + tasks for their subordinates.
     // Staff sees only tasks assigned to them.
@@ -47,8 +51,9 @@ export const getTasks = async (req: Request, res: Response) => {
 
 export const createTask = async (req: Request, res: Response) => {
   try {
-    const assignedById = (req as any).user.id;
-    const role = (req as any).user.role;
+    const user = (req as any).user;
+    const assignedById = user.id;
+    const role = getUserRole(user);
     const { title, description, assignedTo, priority, dueDate } = req.body;
 
     if (!title || !assignedTo) {
@@ -76,6 +81,14 @@ export const createTask = async (req: Request, res: Response) => {
     });
 
     await writeAuditLog(req, 'CREATE', 'TASK', `Task baru dibuat: ${title}`);
+    await createNotification({
+      userId: assignedTo,
+      title: 'Tugas Baru',
+      message: `Anda mendapat tugas baru: ${title}`,
+      type: 'TASK',
+      link: '/tasks',
+      metadata: { taskId: task.id }
+    }).catch(() => {});
     return successResponse(res, task, 'Tugas berhasil dibuat', 201);
   } catch (error) {
     return errorResponse(res, 'Gagal membuat tugas', null, 500);
@@ -86,8 +99,9 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    const userId = (req as any).user.id;
-    const role = (req as any).user.role;
+    const user = (req as any).user;
+    const userId = user.id;
+    const role = getUserRole(user);
 
     const task = await prisma.task.findUnique({ where: { id } });
     if (!task) return errorResponse(res, 'Tugas tidak ditemukan', null, 404);
@@ -106,6 +120,16 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
     });
 
     await writeAuditLog(req, 'UPDATE', 'TASK', `Status task "${task.title}" diubah ke ${status}`);
+    if (status === 'COMPLETED' && task.assignedBy !== userId) {
+      await createNotification({
+        userId: task.assignedBy,
+        title: 'Tugas Selesai',
+        message: `Tugas "${task.title}" sudah ditandai selesai.`,
+        type: 'TASK',
+        link: '/tasks',
+        metadata: { taskId: task.id }
+      }).catch(() => {});
+    }
     return successResponse(res, updated, 'Status tugas berhasil diupdate');
   } catch (error) {
     return errorResponse(res, 'Gagal mengupdate status', null, 500);
@@ -114,8 +138,9 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
 
 export const getUsers = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.id;
-    const role = (req as any).user.role;
+    const user = (req as any).user;
+    const userId = user.id;
+    const role = getUserRole(user);
     const where: any = { isActive: true, deletedAt: null };
 
     if (role === 'MANAGER') {

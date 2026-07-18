@@ -61,6 +61,50 @@ export const createProductionRecord = async (req: Request, res: Response) => {
         });
       }
 
+      const recipes = acceptedQty > 0
+        ? await tx.erpProductRecipe.findMany({
+            where: { productId },
+            include: {
+              ingredient: true,
+              product: true
+            }
+          })
+        : [];
+
+      if (recipes.length > 0) {
+        const outputQtyPerBatch = Math.max(1, recipes[0].product.recipeOutputQty || 1);
+        const requiredBatchCount = Math.ceil(acceptedQty / outputQtyPerBatch);
+
+        for (const recipe of recipes) {
+          const requiredQty = Math.ceil(recipe.qtyNeeded * requiredBatchCount);
+          if (recipe.ingredient.currentStock < requiredQty) {
+            throw new Error(`Stok ${recipe.ingredient.name} tidak mencukupi. Butuh: ${requiredQty}, Tersedia: ${recipe.ingredient.currentStock}`);
+          }
+        }
+
+        for (const recipe of recipes) {
+          const requiredQty = Math.ceil(recipe.qtyNeeded * requiredBatchCount);
+          await tx.warehouseItem.update({
+            where: { id: recipe.warehouseItemId },
+            data: {
+              currentStock: {
+                decrement: requiredQty
+              }
+            }
+          });
+
+          await tx.warehouseMovement.create({
+            data: {
+              warehouseItemId: recipe.warehouseItemId,
+              type: 'OUT',
+              quantity: requiredQty,
+              date: new Date(date),
+              notes: `Auto resep produksi ${newRecord.product.name} (${acceptedQty} produk baik, ${requiredBatchCount} batch)`
+            }
+          });
+        }
+      }
+
       // Add only accepted products to finished goods stock.
       if (acceptedQty > 0) {
         await tx.productStockMovement.create({
@@ -108,9 +152,9 @@ export const createProductionRecord = async (req: Request, res: Response) => {
 
     await writeAuditLog(req, 'CREATE', 'PRODUCTION', `Laporan produksi ${record.product.name} sebanyak ${qty} unit, reject ${rejected}, stok masuk ${acceptedQty}`);
     return successResponse(res, record, 'Laporan produksi berhasil disimpan & target terupdate');
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error create production record:', error);
-    return errorResponse(res, 'Terjadi kesalahan menyimpan produksi', null, 500);
+    return errorResponse(res, error.message || 'Terjadi kesalahan menyimpan produksi', null, 500);
   }
 };
 
@@ -128,7 +172,7 @@ export const getProductionRecords = async (req: Request, res: Response) => {
 
 export const createProduct = async (req: Request, res: Response) => {
   try {
-    const { code, name, category, basePrice } = req.body;
+    const { code, name, category } = req.body;
     if (!code || !name || !category) {
       return errorResponse(res, 'Kode, nama, dan kategori produk wajib diisi', null, 400);
     }
@@ -137,8 +181,7 @@ export const createProduct = async (req: Request, res: Response) => {
       data: {
         code: String(code).trim().toUpperCase(),
         name: String(name).trim(),
-        category: String(category).trim(),
-        basePrice: Number(basePrice || 0)
+        category: String(category).trim()
       }
     });
 

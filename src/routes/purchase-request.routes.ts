@@ -18,8 +18,8 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/', getPurchaseRequests);
-router.get('/:id', getPurchaseRequestById);
 router.get('/suppliers/:warehouseItemId', getSupplierOptionsForItem);
+router.get('/:id', getPurchaseRequestById);
 
 router.post('/', createPurchaseRequest);
 router.patch('/:id/submit', submitToPurchasing);
