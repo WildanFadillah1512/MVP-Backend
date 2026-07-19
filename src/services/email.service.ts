@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import dns from 'dns';
 
 const getBooleanEnv = (value?: string) => ['true', '1', 'yes'].includes((value || '').toLowerCase());
 
@@ -14,9 +15,19 @@ type SmtpConfig = {
   greetingTimeout: number;
   socketTimeout: number;
   family: number;
+  tls?: {
+    servername: string;
+  };
 };
 
-const createSmtpConfig = (host: string, port: number, secure: boolean, user: string, pass: string): SmtpConfig => ({
+const createSmtpConfig = (
+  host: string,
+  port: number,
+  secure: boolean,
+  user: string,
+  pass: string,
+  servername?: string
+): SmtpConfig => ({
   host,
   port,
   secure,
@@ -25,9 +36,24 @@ const createSmtpConfig = (host: string, port: number, secure: boolean, user: str
   greetingTimeout: 10000,
   socketTimeout: 15000,
   family: 4,
+  tls: servername ? { servername } : undefined,
 });
 
-const getSmtpConfigs = () => {
+const resolveConnectionHost = async (host: string) => {
+  if (host !== 'smtp.gmail.com') {
+    return { host };
+  }
+
+  try {
+    const address = await dns.promises.lookup(host, { family: 4 });
+    return { host: address.address, servername: host };
+  } catch (error) {
+    console.error('Failed to resolve Gmail SMTP IPv4 address:', error);
+    return { host };
+  }
+};
+
+const getSmtpConfigs = async () => {
   const host = process.env.SMTP_HOST || 'smtp.gmail.com';
   const port = Number(process.env.SMTP_PORT || 465);
   const user = process.env.SMTP_USER || process.env.GMAIL_USER;
@@ -36,22 +62,23 @@ const getSmtpConfigs = () => {
 
   if (!user || !pass) return null;
 
-  const configs = [createSmtpConfig(host, port, secure, user, pass)];
+  const connection = await resolveConnectionHost(host);
+  const configs = [createSmtpConfig(connection.host, port, secure, user, pass, connection.servername)];
   const isGmail = host === 'smtp.gmail.com';
 
   if (isGmail && port !== 587) {
-    configs.push(createSmtpConfig(host, 587, false, user, pass));
+    configs.push(createSmtpConfig(connection.host, 587, false, user, pass, connection.servername));
   }
 
   if (isGmail && port !== 465) {
-    configs.push(createSmtpConfig(host, 465, true, user, pass));
+    configs.push(createSmtpConfig(connection.host, 465, true, user, pass, connection.servername));
   }
 
   return configs;
 };
 
 export async function sendLoginOtpEmail(to: string, otpCode: string) {
-  const smtpConfigs = getSmtpConfigs();
+  const smtpConfigs = await getSmtpConfigs();
   const appName = process.env.APP_NAME || 'SikaryaERP';
   const from = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER;
 
