@@ -2,7 +2,30 @@ import nodemailer from 'nodemailer';
 
 const getBooleanEnv = (value?: string) => ['true', '1', 'yes'].includes((value || '').toLowerCase());
 
-const getSmtpConfig = () => {
+type SmtpConfig = {
+  host: string;
+  port: number;
+  secure: boolean;
+  auth: {
+    user: string;
+    pass: string;
+  };
+  connectionTimeout: number;
+  greetingTimeout: number;
+  socketTimeout: number;
+};
+
+const createSmtpConfig = (host: string, port: number, secure: boolean, user: string, pass: string): SmtpConfig => ({
+  host,
+  port,
+  secure,
+  auth: { user, pass },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 15000,
+});
+
+const getSmtpConfigs = () => {
   const host = process.env.SMTP_HOST || 'smtp.gmail.com';
   const port = Number(process.env.SMTP_PORT || 465);
   const user = process.env.SMTP_USER || process.env.GMAIL_USER;
@@ -11,23 +34,26 @@ const getSmtpConfig = () => {
 
   if (!user || !pass) return null;
 
-  return {
-    host,
-    port,
-    secure,
-    auth: { user, pass },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-  };
+  const configs = [createSmtpConfig(host, port, secure, user, pass)];
+  const isGmail = host === 'smtp.gmail.com';
+
+  if (isGmail && port !== 587) {
+    configs.push(createSmtpConfig(host, 587, false, user, pass));
+  }
+
+  if (isGmail && port !== 465) {
+    configs.push(createSmtpConfig(host, 465, true, user, pass));
+  }
+
+  return configs;
 };
 
 export async function sendLoginOtpEmail(to: string, otpCode: string) {
-  const smtpConfig = getSmtpConfig();
+  const smtpConfigs = getSmtpConfigs();
   const appName = process.env.APP_NAME || 'SikaryaERP';
   const from = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER;
 
-  if (!smtpConfig || !from) {
+  if (!smtpConfigs || !from) {
     if (process.env.NODE_ENV !== 'production') {
       console.log(`[DEV OTP] ${to}: ${otpCode}`);
       return;
@@ -35,9 +61,7 @@ export async function sendLoginOtpEmail(to: string, otpCode: string) {
     throw new Error('Konfigurasi SMTP OTP belum tersedia');
   }
 
-  const transporter = nodemailer.createTransport(smtpConfig);
-
-  await transporter.sendMail({
+  const mailOptions = {
     from,
     to,
     subject: `Kode masuk ${appName}`,
@@ -52,5 +76,24 @@ export async function sendLoginOtpEmail(to: string, otpCode: string) {
         <p style="margin-top:24px">Terima kasih.</p>
       </div>
     `
-  });
+  };
+
+  let lastError: any;
+  for (const smtpConfig of smtpConfigs) {
+    try {
+      const transporter = nodemailer.createTransport(smtpConfig);
+      await transporter.sendMail(mailOptions);
+      return;
+    } catch (error: any) {
+      lastError = error;
+      console.error(`SMTP send failed on ${smtpConfig.host}:${smtpConfig.port}`, {
+        code: error.code,
+        command: error.command,
+        responseCode: error.responseCode,
+        response: error.response,
+      });
+    }
+  }
+
+  throw lastError || new Error('Gagal mengirim email OTP');
 }
