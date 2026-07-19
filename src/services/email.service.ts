@@ -1,7 +1,10 @@
 import nodemailer from 'nodemailer';
 import dns from 'dns';
+import { google } from 'googleapis';
 
 const getBooleanEnv = (value?: string) => ['true', '1', 'yes'].includes((value || '').toLowerCase());
+
+const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
 
 type SmtpConfig = {
   host: string;
@@ -77,17 +80,98 @@ const getSmtpConfigs = async () => {
   return configs;
 };
 
+const getGoogleOAuthClient = () => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    return null;
+  }
+
+  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
+  oauth2Client.setCredentials({ refresh_token: refreshToken });
+  return oauth2Client;
+};
+
+const encodeBase64Url = (value: string) => Buffer.from(value)
+  .toString('base64')
+  .replace(/\+/g, '-')
+  .replace(/\//g, '_')
+  .replace(/=+$/g, '');
+
+const buildRawEmail = (from: string, to: string, subject: string, text: string, html: string) => {
+  const encodedSubject = `=?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`;
+  const boundary = `sikarya_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const message = [
+    `From: ${from}`,
+    `To: ${to}`,
+    `Subject: ${encodedSubject}`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: 7bit',
+    '',
+    text,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    'Content-Transfer-Encoding: 7bit',
+    '',
+    html,
+    '',
+    `--${boundary}--`,
+    '',
+  ].join('\r\n');
+
+  return encodeBase64Url(message);
+};
+
+const sendWithGmailApi = async (to: string, from: string, subject: string, text: string, html: string) => {
+  const auth = getGoogleOAuthClient();
+  if (!auth) {
+    throw new Error('Google OAuth belum tersedia');
+  }
+
+  const accessToken = await auth.getAccessToken();
+  const token = accessToken.token;
+  if (!token) {
+    throw new Error('Gagal mendapatkan access token Google');
+  }
+
+  const oauth2 = google.oauth2({ version: 'v2', auth });
+  const tokenInfo = await oauth2.tokeninfo({ access_token: token });
+  const scopes = (tokenInfo.data.scope || '').split(/\s+/);
+  if (!scopes.includes(GMAIL_SEND_SCOPE)) {
+    const error: any = new Error('Google OAuth belum memiliki scope Gmail Send');
+    error.code = 'MISSING_GMAIL_SEND_SCOPE';
+    error.scopes = tokenInfo.data.scope;
+    throw error;
+  }
+
+  const gmail = google.gmail({ version: 'v1', auth });
+  await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: {
+      raw: buildRawEmail(from, to, subject, text, html),
+    },
+  });
+};
+
 export async function sendLoginOtpEmail(to: string, otpCode: string) {
   const smtpConfigs = await getSmtpConfigs();
   const appName = process.env.APP_NAME || 'SikaryaERP';
-  const from = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER;
+  const fromEmail = process.env.SMTP_USER || process.env.GMAIL_USER || 'me';
+  const from = process.env.SMTP_FROM || fromEmail;
 
-  if (!smtpConfigs || !from) {
+  if (!from) {
     if (process.env.NODE_ENV !== 'production') {
       console.log(`[DEV OTP] ${to}: ${otpCode}`);
       return;
     }
-    throw new Error('Konfigurasi SMTP OTP belum tersedia');
+    throw new Error('Konfigurasi email OTP belum tersedia');
   }
 
   const mailOptions = {
@@ -106,6 +190,30 @@ export async function sendLoginOtpEmail(to: string, otpCode: string) {
       </div>
     `
   };
+
+  const emailErrors: any[] = [];
+  try {
+    await sendWithGmailApi(to, from, mailOptions.subject, mailOptions.text, mailOptions.html);
+    return;
+  } catch (error: any) {
+    emailErrors.push({
+      provider: 'gmail_api',
+      code: error.code,
+      message: error.message,
+      scopes: error.scopes,
+    });
+    console.error('Gmail API send failed', {
+      code: error.code,
+      message: error.message,
+      scopes: error.scopes,
+    });
+  }
+
+  if (!smtpConfigs || smtpConfigs.length === 0) {
+    const error: any = new Error('Konfigurasi SMTP OTP belum tersedia');
+    error.emailAttempts = emailErrors;
+    throw error;
+  }
 
   let lastError: any;
   const attempts: Array<{
@@ -146,5 +254,6 @@ export async function sendLoginOtpEmail(to: string, otpCode: string) {
 
   const finalError: any = lastError || new Error('Gagal mengirim email OTP');
   finalError.smtpAttempts = attempts;
+  finalError.emailAttempts = emailErrors;
   throw finalError;
 }

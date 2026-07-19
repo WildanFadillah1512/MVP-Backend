@@ -87,7 +87,10 @@ export const login = async (req: Request, res: Response) => {
         return errorResponse(
           res,
           'Gagal mengirim OTP. Periksa konfigurasi SMTP/Gmail di Render.',
-          emailError.smtpAttempts || null,
+          {
+            gmailApi: emailError.emailAttempts || null,
+            smtp: emailError.smtpAttempts || null,
+          },
           500
         );
       }

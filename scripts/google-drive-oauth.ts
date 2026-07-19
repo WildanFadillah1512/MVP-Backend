@@ -15,10 +15,13 @@ const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri)
 const authUrl = oauth2Client.generateAuthUrl({
   access_type: 'offline',
   prompt: 'consent',
-  scope: ['https://www.googleapis.com/auth/drive'],
+  scope: [
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/gmail.send',
+  ],
 });
 
-console.log('\nOpen this URL, approve access, then paste the code here:\n');
+console.log('\nOpen this URL and approve Google Drive + Gmail Send access:\n');
 console.log(authUrl);
 
 const server = http.createServer(async (req, res) => {
@@ -39,7 +42,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const { tokens } = await oauth2Client.getToken(code);
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Google Drive OAuth berhasil. Silakan kembali ke terminal.');
+    res.end('Google OAuth berhasil. Silakan kembali ke terminal.');
     console.log('\nGOOGLE_REFRESH_TOKEN=' + tokens.refresh_token);
   } catch (error) {
     res.writeHead(500, { 'Content-Type': 'text/plain' });
