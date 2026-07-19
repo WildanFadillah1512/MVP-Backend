@@ -177,16 +177,21 @@ export async function sendLoginOtpEmail(to: string, otpCode: string) {
   const mailOptions = {
     from,
     to,
-    subject: `Kode masuk ${appName}`,
-    text: `Halo,\n\nKode masuk ${appName} Anda adalah ${otpCode}.\n\nKode ini berlaku selama 10 menit. Jika Anda tidak sedang mencoba masuk, abaikan email ini.\n\nTerima kasih.`,
+    subject: `${appName} - Kode Verifikasi Login`,
+    text: `Halo,\n\nKami menerima permintaan login ke akun ${appName} Anda.\n\nKode verifikasi Anda: ${otpCode}\n\nKode ini berlaku selama 10 menit. Demi keamanan, jangan bagikan kode ini kepada siapa pun.\n\nJika Anda tidak sedang mencoba masuk, abaikan email ini.\n\nTerima kasih,\n${appName}`,
     html: `
-      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#1f2937;max-width:520px">
-        <p>Halo,</p>
-        <p>Gunakan kode berikut untuk masuk ke ${appName}:</p>
-        <p style="font-size:30px;font-weight:700;letter-spacing:6px;margin:18px 0;color:#111827">${otpCode}</p>
-        <p>Kode ini berlaku selama 10 menit.</p>
-        <p>Jika Anda tidak sedang mencoba masuk, email ini bisa diabaikan.</p>
-        <p style="margin-top:24px">Terima kasih.</p>
+      <div style="margin:0;padding:0;background:#f6f7f8">
+        <div style="max-width:560px;margin:0 auto;padding:24px 16px;font-family:Arial,sans-serif;color:#1f2937;line-height:1.6">
+          <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;padding:24px">
+            <p style="margin:0 0 16px">Halo,</p>
+            <p style="margin:0 0 16px">Kami menerima permintaan login ke akun ${appName} Anda.</p>
+            <p style="margin:0 0 8px">Kode verifikasi Anda:</p>
+            <p style="margin:0 0 20px;font-size:28px;font-weight:700;color:#111827;letter-spacing:4px">${otpCode}</p>
+            <p style="margin:0 0 12px">Kode ini berlaku selama 10 menit. Demi keamanan, jangan bagikan kode ini kepada siapa pun.</p>
+            <p style="margin:0">Jika Anda tidak sedang mencoba masuk, email ini bisa diabaikan.</p>
+          </div>
+          <p style="margin:16px 0 0;color:#6b7280;font-size:12px">Email ini dikirim otomatis oleh ${appName}.</p>
+        </div>
       </div>
     `
   };
