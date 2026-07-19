@@ -13,6 +13,7 @@ type SmtpConfig = {
   connectionTimeout: number;
   greetingTimeout: number;
   socketTimeout: number;
+  family: number;
 };
 
 const createSmtpConfig = (host: string, port: number, secure: boolean, user: string, pass: string): SmtpConfig => ({
@@ -23,6 +24,7 @@ const createSmtpConfig = (host: string, port: number, secure: boolean, user: str
   connectionTimeout: 10000,
   greetingTimeout: 10000,
   socketTimeout: 15000,
+  family: 4,
 });
 
 const getSmtpConfigs = () => {
