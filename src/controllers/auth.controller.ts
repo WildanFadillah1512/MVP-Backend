@@ -80,7 +80,12 @@ export const login = async (req: Request, res: Response) => {
         }
       });
 
-      await sendLoginOtpEmail(user.email, otpCode);
+      try {
+        await sendLoginOtpEmail(user.email, otpCode);
+      } catch (emailError: any) {
+        console.error('OTP email send error:', emailError.message);
+        return errorResponse(res, 'Gagal mengirim OTP. Periksa konfigurasi SMTP/Gmail di Render.', null, 500);
+      }
 
       return successResponse(res, {
         requiresOtp: true,
