@@ -6,7 +6,7 @@ const getSmtpConfig = () => {
   const host = process.env.SMTP_HOST || 'smtp.gmail.com';
   const port = Number(process.env.SMTP_PORT || 465);
   const user = process.env.SMTP_USER || process.env.GMAIL_USER;
-  const pass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD;
+  const pass = (process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || '').replace(/\s+/g, '');
   const secure = process.env.SMTP_SECURE ? getBooleanEnv(process.env.SMTP_SECURE) : port === 465;
 
   if (!user || !pass) return null;
