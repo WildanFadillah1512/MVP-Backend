@@ -112,6 +112,7 @@ model User {
 
   // Audits
   auditLogs AuditLog[]
+  loginOtps LoginOtp[]
 
   // Location
   locationLogs LocationLog[]
@@ -131,6 +132,24 @@ model User {
   deletedAt DateTime?
 
   @@index([branchId])
+}
+
+model LoginOtp {
+  id            String    @id @default(uuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+  otpHash       String
+  tempTokenHash String    @unique
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  attempts      Int       @default(0)
+  ipAddress     String?
+  userAgent     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, consumedAt])
+  @@index([expiresAt])
 }
 
 // -----------------------------------------
