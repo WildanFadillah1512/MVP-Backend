@@ -32,14 +32,16 @@ export async function sendLoginOtpEmail(to: string, otpCode: string) {
   await transporter.sendMail({
     from,
     to,
-    subject: `Kode OTP Login ${appName}`,
-    text: `Kode OTP login ${appName}: ${otpCode}. Kode berlaku 10 menit.`,
+    subject: `Kode masuk ${appName}`,
+    text: `Halo,\n\nKode masuk ${appName} Anda adalah ${otpCode}.\n\nKode ini berlaku selama 10 menit. Jika Anda tidak sedang mencoba masuk, abaikan email ini.\n\nTerima kasih.`,
     html: `
-      <div style="font-family:Arial,sans-serif;line-height:1.5;color:#1f2937">
-        <h2 style="margin:0 0 12px">${appName}</h2>
-        <p>Kode OTP login Anda:</p>
-        <p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:16px 0">${otpCode}</p>
-        <p>Kode berlaku 10 menit. Abaikan email ini jika Anda tidak mencoba login.</p>
+      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#1f2937;max-width:520px">
+        <p>Halo,</p>
+        <p>Gunakan kode berikut untuk masuk ke ${appName}:</p>
+        <p style="font-size:30px;font-weight:700;letter-spacing:6px;margin:18px 0;color:#111827">${otpCode}</p>
+        <p>Kode ini berlaku selama 10 menit.</p>
+        <p>Jika Anda tidak sedang mencoba masuk, email ini bisa diabaikan.</p>
+        <p style="margin-top:24px">Terima kasih.</p>
       </div>
     `
   });

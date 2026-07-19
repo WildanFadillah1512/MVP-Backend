@@ -55,6 +55,25 @@ async function main() {
     },
   });
 
+  await prisma.user.upsert({
+    where: { email: 'wildan.fadillah@nusaputra.ac.id' },
+    update: {
+      name: 'Wildan Fadillah',
+      roleId: roleRecords[RoleName.OWNER].id,
+      divisionId: divisionRecords.NONE.id,
+      isActive: true,
+      deletedAt: null,
+    },
+    create: {
+      email: 'wildan.fadillah@nusaputra.ac.id',
+      password,
+      name: 'Wildan Fadillah',
+      roleId: roleRecords[RoleName.OWNER].id,
+      divisionId: divisionRecords.NONE.id,
+      leaveBalances: { create: { totalQuota: 12, usedQuota: 0 } }
+    },
+  });
+
   // CEO
   const ceo = await prisma.user.upsert({
     where: { email: 'ceo@company.com' },
