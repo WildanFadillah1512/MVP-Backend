@@ -79,6 +79,16 @@ export async function sendLoginOtpEmail(to: string, otpCode: string) {
   };
 
   let lastError: any;
+  const attempts: Array<{
+    host: string;
+    port: number;
+    secure: boolean;
+    code?: string;
+    command?: string;
+    responseCode?: number;
+    response?: string;
+    message?: string;
+  }> = [];
   for (const smtpConfig of smtpConfigs) {
     try {
       const transporter = nodemailer.createTransport(smtpConfig);
@@ -86,6 +96,16 @@ export async function sendLoginOtpEmail(to: string, otpCode: string) {
       return;
     } catch (error: any) {
       lastError = error;
+      attempts.push({
+        host: smtpConfig.host,
+        port: smtpConfig.port,
+        secure: smtpConfig.secure,
+        code: error.code,
+        command: error.command,
+        responseCode: error.responseCode,
+        response: error.response,
+        message: error.message,
+      });
       console.error(`SMTP send failed on ${smtpConfig.host}:${smtpConfig.port}`, {
         code: error.code,
         command: error.command,
@@ -95,5 +115,7 @@ export async function sendLoginOtpEmail(to: string, otpCode: string) {
     }
   }
 
-  throw lastError || new Error('Gagal mengirim email OTP');
+  const finalError: any = lastError || new Error('Gagal mengirim email OTP');
+  finalError.smtpAttempts = attempts;
+  throw finalError;
 }
