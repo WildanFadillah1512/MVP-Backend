@@ -11,7 +11,15 @@ const getSmtpConfig = () => {
 
   if (!user || !pass) return null;
 
-  return { host, port, secure, auth: { user, pass } };
+  return {
+    host,
+    port,
+    secure,
+    auth: { user, pass },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+  };
 };
 
 export async function sendLoginOtpEmail(to: string, otpCode: string) {
