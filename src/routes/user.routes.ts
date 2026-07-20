@@ -8,6 +8,9 @@ import {
   getUserOptions,
   updateProfile,
   createDivision,
+  createBranch,
+  updateBranch,
+  deleteBranch,
   requestResignation,
   getResignationRequests,
   createWarningLetter,
@@ -29,6 +32,9 @@ router.use(authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER']));
 
 router.get('/options', getUserOptions);
 router.post('/divisions', createDivision);
+router.post('/branches', createBranch);
+router.patch('/branches/:id', updateBranch);
+router.delete('/branches/:id', deleteBranch);
 router.get('/resignations', getResignationRequests);
 router.get('/warnings', getWarningLetters);
 router.post('/warnings', createWarningLetter);

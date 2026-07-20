@@ -541,6 +541,99 @@ export const createDivision = async (req: Request, res: Response) => {
   }
 };
 
+const assertCanManageBranches = (req: Request) => {
+  const actorRole = (req as any).user.role;
+  return TOP_LEVEL_ROLES.includes(actorRole);
+};
+
+const normalizeBranchPayload = (body: any) => ({
+  code: String(body.code || '').trim().toUpperCase(),
+  name: String(body.name || '').trim(),
+  address: body.address ? String(body.address).trim() : null
+});
+
+export const createBranch = async (req: Request, res: Response) => {
+  try {
+    if (!assertCanManageBranches(req)) {
+      return errorResponse(res, 'Hanya Owner/CEO/Admin yang dapat menambah cabang', null, 403);
+    }
+
+    const payload = normalizeBranchPayload(req.body);
+    if (!payload.code || !payload.name) {
+      return errorResponse(res, 'Kode dan nama cabang wajib diisi', null, 400);
+    }
+
+    const branch = await prisma.branch.create({ data: payload });
+    await writeAuditLog(req, 'CREATE', 'BRANCH', `Cabang baru dibuat: ${branch.code} - ${branch.name}`);
+    return successResponse(res, branch, 'Cabang berhasil dibuat', 201);
+  } catch (error: any) {
+    if (error?.code === 'P2002') {
+      return errorResponse(res, 'Kode cabang sudah digunakan', null, 400);
+    }
+    return errorResponse(res, 'Gagal membuat cabang', null, 500);
+  }
+};
+
+export const updateBranch = async (req: Request, res: Response) => {
+  try {
+    if (!assertCanManageBranches(req)) {
+      return errorResponse(res, 'Hanya Owner/CEO/Admin yang dapat mengubah cabang', null, 403);
+    }
+
+    const payload = normalizeBranchPayload(req.body);
+    if (!payload.code || !payload.name) {
+      return errorResponse(res, 'Kode dan nama cabang wajib diisi', null, 400);
+    }
+
+    const branch = await prisma.branch.update({
+      where: { id: req.params.id },
+      data: payload
+    });
+
+    await writeAuditLog(req, 'UPDATE', 'BRANCH', `Cabang diperbarui: ${branch.code} - ${branch.name}`);
+    return successResponse(res, branch, 'Cabang berhasil diperbarui');
+  } catch (error: any) {
+    if (error?.code === 'P2002') {
+      return errorResponse(res, 'Kode cabang sudah digunakan', null, 400);
+    }
+    if (error?.code === 'P2025') {
+      return errorResponse(res, 'Cabang tidak ditemukan', null, 404);
+    }
+    return errorResponse(res, 'Gagal memperbarui cabang', null, 500);
+  }
+};
+
+export const deleteBranch = async (req: Request, res: Response) => {
+  try {
+    if (!assertCanManageBranches(req)) {
+      return errorResponse(res, 'Hanya Owner/CEO/Admin yang dapat menghapus cabang', null, 403);
+    }
+
+    const [userCount, reportCount] = await Promise.all([
+      prisma.user.count({ where: { branchId: req.params.id, deletedAt: null } }),
+      prisma.cashierReport.count({ where: { branchId: req.params.id } })
+    ]);
+
+    if (userCount > 0 || reportCount > 0) {
+      return errorResponse(
+        res,
+        `Cabang masih digunakan oleh ${userCount} karyawan dan ${reportCount} laporan kasir`,
+        null,
+        400
+      );
+    }
+
+    const branch = await prisma.branch.delete({ where: { id: req.params.id } });
+    await writeAuditLog(req, 'DELETE', 'BRANCH', `Cabang dihapus: ${branch.code} - ${branch.name}`);
+    return successResponse(res, { id: branch.id }, 'Cabang berhasil dihapus');
+  } catch (error: any) {
+    if (error?.code === 'P2025') {
+      return errorResponse(res, 'Cabang tidak ditemukan', null, 404);
+    }
+    return errorResponse(res, 'Gagal menghapus cabang', null, 500);
+  }
+};
+
 export const updateProfile = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
