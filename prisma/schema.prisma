@@ -33,6 +33,7 @@ enum LeaveStatus {
   PENDING
   APPROVED
   REJECTED
+  CANCELLED
 }
 
 enum ReportStatus {
@@ -73,6 +74,16 @@ model Division {
   updatedAt DateTime     @updatedAt
 }
 
+model Shift {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  startTime String   // e.g., "08:00"
+  endTime   String   // e.g., "17:00"
+  users     User[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model User {
   id         String  @id @default(uuid())
   email      String  @unique
@@ -81,6 +92,7 @@ model User {
   roleId     String
   divisionId String
   branchId   String?
+  shiftId    String?
   isActive   Boolean @default(true)
 
   // New fields for profile
@@ -91,6 +103,7 @@ model User {
   role     Role     @relation(fields: [roleId], references: [id])
   division Division @relation(fields: [divisionId], references: [id])
   branch   Branch?  @relation(fields: [branchId], references: [id])
+  shift    Shift?   @relation(fields: [shiftId], references: [id])
 
   // Hierarchy
   supervisorId String?
@@ -213,11 +226,37 @@ model DailyReport {
   status      ReportStatus @default(DRAFT)
 
   uploads DailyUpload[]
+  tasks   DailyReportTask[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([userId, date])
+}
+
+model DailyReportTask {
+  id                 String       @id @default(uuid())
+  reportId           String
+  report             DailyReport  @relation(fields: [reportId], references: [id])
+  
+  // What kind of task/job is this?
+  taskType           String       // "TASK", "TARGET", "STOCK_OUT", "PRODUCTION"
+  
+  // References to specific entities (all optional, only one used based on taskType)
+  taskId             String?
+  targetAssignmentId String?
+  warehouseItemId    String?
+  productId          String?
+  
+  // For target/stock/production
+  quantity           Float?
+  
+  notes              String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([reportId])
 }
 
 model DailyUpload {

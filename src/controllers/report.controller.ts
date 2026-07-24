@@ -3,7 +3,7 @@ import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { successResponse, errorResponse } from '../utils/response';
 import { writeAuditLog } from '../utils/audit';
-import { ReportStatus } from '@prisma/client';
+import { ReportStatus, StockMovementType } from '@prisma/client';
 
 const TOP_MANAGEMENT = ['OWNER', 'CEO', 'ADMIN'];
 
@@ -26,7 +26,7 @@ const getSubordinateIds = async (userId: string) => {
 export const createReport = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
-    const { description, output, obstacles, notes } = req.body;
+    const { description, output, obstacles, notes, tasks } = req.body;
     
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -40,6 +40,8 @@ export const createReport = async (req: Request, res: Response) => {
         },
       },
     });
+
+    let reportId = '';
 
     if (existingReport) {
       if (existingReport.status === ReportStatus.LOCKED) {
@@ -57,24 +59,71 @@ export const createReport = async (req: Request, res: Response) => {
           status: ReportStatus.SUBMITTED,
         },
       });
-      return successResponse(res, updatedReport, 'Laporan berhasil diperbarui');
+      reportId = updatedReport.id;
+    } else {
+      // Create new
+      const report = await prisma.dailyReport.create({
+        data: {
+          userId,
+          date: today,
+          description,
+          output,
+          obstacles,
+          notes,
+          status: ReportStatus.SUBMITTED,
+        },
+      });
+      reportId = report.id;
     }
 
-    // Create new
-    const report = await prisma.dailyReport.create({
-      data: {
-        userId,
-        date: today,
-        description,
-        output,
-        obstacles,
-        notes,
-        status: ReportStatus.SUBMITTED,
-      },
-    });
+    // Process tasks if provided
+    if (tasks && Array.isArray(tasks) && tasks.length > 0) {
+      for (const t of tasks) {
+        const { taskType, taskId, targetAssignmentId, warehouseItemId, quantity, notes: taskNotes } = t;
 
-        await writeAuditLog(req, 'CREATE', 'DAILY_REPORT', 'Laporan harian disubmit');
-    return successResponse(res, report, 'Laporan berhasil disubmit');
+        // Save DailyReportTask
+        await prisma.dailyReportTask.create({
+          data: {
+            reportId,
+            taskType,
+            taskId,
+            targetAssignmentId,
+            warehouseItemId,
+            quantity: quantity ? Number(quantity) : null,
+            notes: taskNotes,
+          }
+        });
+
+        // Auto-update related entities
+        if (taskType === 'TASK' && taskId) {
+          await prisma.task.update({
+            where: { id: taskId },
+            data: { status: 'IN_PROGRESS' }
+          });
+        } else if (taskType === 'TARGET' && targetAssignmentId && quantity) {
+          await prisma.targetAssignment.update({
+            where: { id: targetAssignmentId },
+            data: { currentValue: { increment: Number(quantity) } }
+          });
+        } else if (taskType === 'STOCK_OUT' && warehouseItemId && quantity) {
+          await prisma.warehouseMovement.create({
+            data: {
+              warehouseItemId,
+              type: StockMovementType.OUT,
+              quantity: Number(quantity),
+              notes: `Terpakai oleh ${userId} (Laporan Harian)`
+            }
+          });
+          await prisma.warehouseItem.update({
+            where: { id: warehouseItemId },
+            data: { currentStock: { decrement: Number(quantity) } }
+          });
+        }
+      }
+    }
+
+    await writeAuditLog(req, 'CREATE', 'DAILY_REPORT', 'Laporan harian disubmit');
+    return successResponse(res, { id: reportId }, 'Laporan berhasil disubmit');
   } catch (error) {
     console.error('Create report error:', error);
     return errorResponse(res, 'Terjadi kesalahan saat membuat laporan', null, 500);
@@ -84,7 +133,6 @@ export const createReport = async (req: Request, res: Response) => {
 export const getMyReports = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
-    
     const reports = await prisma.dailyReport.findMany({
       where: { userId },
       orderBy: { date: 'desc' },

@@ -60,12 +60,20 @@ const getTodayWIB = (): Date => {
   return today;
 };
 
-// Cek apakah jam >= 09:00 WIB
-const isLateWIB = (): boolean => {
+// Cek apakah jam melewati startTime dari Shift
+const isLate = (shiftStartTime?: string): boolean => {
   const now = new Date();
   const wibOffset = 7 * 60 * 60 * 1000;
   const wibNow = new Date(now.getTime() + wibOffset);
-  return wibNow.getUTCHours() >= 9;
+  
+  // Default to 09:00 if no shift
+  const limitHour = shiftStartTime ? parseInt(shiftStartTime.split(':')[0]) : 9;
+  const limitMinute = shiftStartTime ? parseInt(shiftStartTime.split(':')[1]) : 0;
+  
+  if (wibNow.getUTCHours() > limitHour) return true;
+  if (wibNow.getUTCHours() === limitHour && wibNow.getUTCMinutes() > limitMinute) return true;
+  
+  return false;
 };
 
 export const checkIn = async (req: Request, res: Response) => {
@@ -95,12 +103,18 @@ export const checkIn = async (req: Request, res: Response) => {
 
     const now = new Date();
 
+    // Get User with Shift
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { shift: true }
+    });
+
     const attendance = await prisma.attendance.create({
       data: {
         userId,
         date: today,
         checkIn: now,
-        status: isLateWIB() ? AttendanceStatus.TELAT : AttendanceStatus.HADIR,
+        status: isLate(user?.shift?.startTime) ? AttendanceStatus.TELAT : AttendanceStatus.HADIR,
       },
       include: {
         user: {

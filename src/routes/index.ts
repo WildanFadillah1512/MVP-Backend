@@ -25,6 +25,7 @@ import purchaseRequestRoutes from './purchase-request.routes';
 import recipeRoutes from './recipe.routes';
 import fileUploadRoutes from './file-upload.routes';
 import materialRequestRoutes from './material-request.routes';
+import shiftRoutes from './shift.routes';
 
 const router = Router();
 
@@ -54,5 +55,6 @@ router.use('/paklaring', paklaringRoutes);
 router.use('/payroll', payrollRoutes);
 router.use('/file-upload', fileUploadRoutes);
 router.use('/material-requests', materialRequestRoutes);
+router.use('/shifts', shiftRoutes);
 
 export default router;

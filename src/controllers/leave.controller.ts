@@ -150,6 +150,8 @@ export const approveLeave = async (req: Request, res: Response) => {
     }
 
     // Process approval
+
+    // Process approval
     const result = await prisma.$transaction(async (tx) => {
       const updatedReq = await tx.leaveRequest.update({
         where: { id },
@@ -175,5 +177,69 @@ export const approveLeave = async (req: Request, res: Response) => {
     return successResponse(res, result, `Pengajuan cuti berhasil di-${status.toLowerCase()}`);
   } catch (error) {
     return errorResponse(res, 'Terjadi kesalahan saat memproses cuti', null, 500);
+  }
+};
+
+export const cancelLeave = async (req: Request, res: Response) => {
+  try {
+    const actor = (req as any).user;
+    const { id } = req.params;
+
+    const request = await prisma.leaveRequest.findUnique({
+      where: { id },
+      include: { user: { include: { supervisor: true } } }
+    });
+
+    if (!request) return errorResponse(res, 'Pengajuan tidak ditemukan', null, 404);
+    
+    // Only the user who requested it can cancel it
+    if (request.userId !== actor.id) {
+      return errorResponse(res, 'Anda hanya dapat membatalkan cuti Anda sendiri', null, 403);
+    }
+
+    if (request.status === LeaveStatus.REJECTED || request.status === LeaveStatus.CANCELLED) {
+      return errorResponse(res, `Tidak dapat membatalkan cuti yang sudah berstatus ${request.status}`, null, 400);
+    }
+
+    const previousStatus = request.status;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const updatedReq = await tx.leaveRequest.update({
+        where: { id },
+        data: { status: LeaveStatus.CANCELLED }
+      });
+
+      // Refund quota if it was already approved
+      if (previousStatus === LeaveStatus.APPROVED) {
+        const start = new Date(request.startDate);
+        const end = new Date(request.endDate);
+        const requestedDays = Math.ceil(Math.abs(end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+        await tx.leaveBalance.update({
+          where: { userId: request.userId },
+          data: {
+            usedQuota: { decrement: requestedDays }
+          }
+        });
+      }
+      return updatedReq;
+    });
+
+    // Notify supervisor/manager about the cancellation
+    const supervisorId = request.user.supervisorId;
+    if (supervisorId) {
+      await prisma.notification.create({
+        data: {
+          userId: supervisorId,
+          title: 'Cuti Dibatalkan',
+          message: `${actor.name} membatalkan pengajuan cuti tanggal ${new Date(request.startDate).toLocaleDateString('id-ID')}.`,
+          type: 'INFO'
+        }
+      });
+    }
+
+    return successResponse(res, result, 'Cuti berhasil dibatalkan');
+  } catch (error) {
+    return errorResponse(res, 'Terjadi kesalahan saat membatalkan cuti', null, 500);
   }
 };
