@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { errorResponse, successResponse } from '../utils/response';
+import { createBulkNotifications, createNotification } from '../services/notification.service';
 
 const getUserRole = (user: any) => user.role?.name || user.role;
 const getUserDivision = (user: any) => user.division?.name || user.division;
@@ -26,6 +27,10 @@ export const createPurchaseRequest = async (req: Request, res: Response) => {
     }
 
     const requestNumber = await generateRequestNumber();
+    const item = await prisma.warehouseItem.findFirst({ where: { id: warehouseItemId, isActive: true } });
+    if (!item) {
+      return errorResponse(res, 'Barang gudang wajib dipilih dari master gudang aktif', null, 400);
+    }
 
     const purchaseRequest = await prisma.purchaseRequest.create({
       data: {
@@ -41,6 +46,27 @@ export const createPurchaseRequest = async (req: Request, res: Response) => {
         item: true
       }
     });
+
+    const targetUsers = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        deletedAt: null,
+        OR: [
+          { division: { name: 'PURCHASING' } },
+          { role: { name: { in: ['OWNER', 'CEO', 'ADMIN', 'GM'] as any } } }
+        ]
+      },
+      select: { id: true }
+    });
+
+    await createBulkNotifications(targetUsers.map((target) => ({
+      userId: target.id,
+      title: 'Purchase Request Dibuat',
+      message: `${purchaseRequest.requestNumber} untuk ${item.name} sejumlah ${requestedQty} ${item.unit}.`,
+      type: 'INFO',
+      link: '/purchase-requests',
+      metadata: { purchaseRequestId: purchaseRequest.id }
+    }))).catch(() => {});
 
     return successResponse(res, purchaseRequest, 'Purchase request created successfully', 201);
   } catch (error: any) {
@@ -95,15 +121,14 @@ export const submitToPurchasing = async (req: Request, res: Response) => {
     });
 
     if (purchasingUsers.length > 0) {
-      await prisma.notification.createMany({
-        data: purchasingUsers.map((purchasingUser) => ({
+      await createBulkNotifications(purchasingUsers.map((purchasingUser) => ({
           userId: purchasingUser.id,
           title: 'New Purchase Request',
           message: `Purchase request ${purchaseRequest.requestNumber} submitted`,
           type: 'INFO',
-          link: `/purchase-requests`
-        }))
-      });
+          link: `/purchase-requests`,
+          metadata: { purchaseRequestId: purchaseRequest.id }
+        }))).catch(() => {});
     }
 
     return successResponse(res, purchaseRequest, 'Purchase request submitted to purchasing');
@@ -164,15 +189,14 @@ export const setPriceAndSupplier = async (req: Request, res: Response) => {
     });
 
     if (manager) {
-      await prisma.notification.create({
-        data: {
+      await createNotification({
           userId: manager.id,
           title: 'Purchase Request for Approval',
           message: `Purchase request ${purchaseRequest.requestNumber} needs manager approval`,
           type: 'INFO',
-          link: `/purchase-requests`
-        }
-      });
+          link: `/purchase-requests`,
+          metadata: { purchaseRequestId: purchaseRequest.id }
+      }).catch(() => {});
     }
 
     return successResponse(res, purchaseRequest, 'Price and supplier set successfully');
@@ -222,15 +246,14 @@ export const managerApprove = async (req: Request, res: Response) => {
     });
 
     if (ceo) {
-      await prisma.notification.create({
-        data: {
+      await createNotification({
           userId: ceo.id,
           title: 'Purchase Request for Final Approval',
           message: `Purchase request ${purchaseRequest.requestNumber} needs CEO approval`,
           type: 'INFO',
-          link: `/purchase-requests`
-        }
-      });
+          link: `/purchase-requests`,
+          metadata: { purchaseRequestId: purchaseRequest.id }
+      }).catch(() => {});
     }
 
     return successResponse(res, purchaseRequest, 'Purchase request approved by manager');
@@ -273,15 +296,14 @@ export const ceoApprove = async (req: Request, res: Response) => {
 
     // Notify purchasing staff
     if (purchaseRequest.staffId) {
-      await prisma.notification.create({
-        data: {
+      await createNotification({
           userId: purchaseRequest.staffId,
           title: 'Purchase Request Approved',
           message: `Purchase request ${purchaseRequest.requestNumber} approved by CEO`,
           type: 'INFO',
-          link: `/purchase-requests`
-        }
-      });
+          link: `/purchase-requests`,
+          metadata: { purchaseRequestId: purchaseRequest.id }
+      }).catch(() => {});
     }
 
     return successResponse(res, purchaseRequest, 'Purchase request approved by CEO');
@@ -314,15 +336,14 @@ export const rejectPurchaseRequest = async (req: Request, res: Response) => {
     });
 
     // Notify requester
-    await prisma.notification.create({
-      data: {
+    await createNotification({
         userId: purchaseRequest.requestedById,
         title: 'Purchase Request Rejected',
         message: `Purchase request ${purchaseRequest.requestNumber} was rejected`,
         type: 'WARNING',
-        link: `/purchase-requests`
-      }
-    });
+        link: `/purchase-requests`,
+        metadata: { purchaseRequestId: purchaseRequest.id }
+    }).catch(() => {});
 
     return successResponse(res, purchaseRequest, 'Purchase request rejected');
   } catch (error: any) {
@@ -387,6 +408,27 @@ export const markAsPurchased = async (req: Request, res: Response) => {
         date: new Date()
       }
     });
+
+    const targetUsers = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        deletedAt: null,
+        OR: [
+          { division: { name: { in: ['GUDANG', 'PURCHASING'] as any } } },
+          { role: { name: { in: ['OWNER', 'CEO', 'ADMIN', 'GM'] as any } } }
+        ]
+      },
+      select: { id: true }
+    });
+
+    await createBulkNotifications(targetUsers.map((target) => ({
+      userId: target.id,
+      title: 'Barang Pembelian Masuk Gudang',
+      message: `${purchaseRequest.item.name} masuk gudang ${purchasedQty} ${purchaseRequest.item.unit} dari ${purchaseRequest.requestNumber}.`,
+      type: 'INFO',
+      link: '/warehouse',
+      metadata: { purchaseRequestId: purchaseRequest.id, warehouseItemId: purchaseRequest.warehouseItemId }
+    }))).catch(() => {});
 
     return successResponse(res, purchaseRequest, 'Purchase completed successfully');
   } catch (error: any) {

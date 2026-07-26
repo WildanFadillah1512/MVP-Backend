@@ -17,6 +17,7 @@ export const getBranches = async (req: Request, res: Response) => {
 export const createCashierReport = async (req: Request, res: Response) => {
   try {
     const { branchId, date, totalCash, totalTransfer, totalQris, totalExpense, depositProofUrl, notes, productsSold } = req.body;
+    const createdById = (req as any).user.id;
     
     const cash = Number(totalCash) || 0;
     const transfer = Number(totalTransfer) || 0;
@@ -35,6 +36,7 @@ export const createCashierReport = async (req: Request, res: Response) => {
           totalQris: qris,
           totalExpense: expense,
           netTotal,
+          createdById,
           depositProofUrl: depositProofUrl || null,
           notes
         }
@@ -111,7 +113,10 @@ export const createBranch = async (req: Request, res: Response) => {
 export const getCashierReports = async (req: Request, res: Response) => {
   try {
     const reports = await prisma.cashierReport.findMany({
-      include: { branch: true },
+      include: {
+        branch: true,
+        createdBy: { select: { id: true, name: true, email: true } }
+      },
       orderBy: { date: 'desc' }
     });
     return successResponse(res, reports, 'Laporan kasir berhasil diambil');

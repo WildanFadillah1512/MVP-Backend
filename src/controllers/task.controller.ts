@@ -54,10 +54,15 @@ export const createTask = async (req: Request, res: Response) => {
     const user = (req as any).user;
     const assignedById = user.id;
     const role = getUserRole(user);
-    const { title, description, assignedTo, priority, dueDate } = req.body;
+    const { title, description, assignedTo, priority, dueDate, scheduleType, scheduleDate } = req.body;
 
     if (!title || !assignedTo) {
       return errorResponse(res, 'Judul dan penerima tugas wajib diisi', null, 400);
+    }
+
+    const normalizedScheduleType = ['ONE_TIME', 'DAILY', 'MONTHLY'].includes(scheduleType) ? scheduleType : 'ONE_TIME';
+    if (normalizedScheduleType !== 'ONE_TIME' && !scheduleDate) {
+      return errorResponse(res, 'Tanggal/bulan tugas wajib diisi untuk tugas harian atau bulanan', null, 400);
     }
 
     if (role === 'MANAGER') {
@@ -76,6 +81,8 @@ export const createTask = async (req: Request, res: Response) => {
         assignedTo,
         assignedBy: assignedById,
         priority: priority || 'MEDIUM',
+        scheduleType: normalizedScheduleType,
+        scheduleDate: scheduleDate ? new Date(scheduleDate) : null,
         dueDate: dueDate ? new Date(dueDate) : null
       }
     });

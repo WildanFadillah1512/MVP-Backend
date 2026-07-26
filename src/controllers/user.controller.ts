@@ -75,6 +75,20 @@ const getManagementChainAndExecutives = async (userId: string) => {
   return [...targetIds].filter((id) => id !== userId);
 };
 
+const ensureDefaultShifts = async () => {
+  const shifts = [
+    { name: 'Pagi', startTime: '07:00', endTime: '15:00' },
+    { name: 'Middle', startTime: '11:00', endTime: '19:00' },
+    { name: 'Malam', startTime: '19:00', endTime: '03:00' },
+  ];
+
+  await Promise.all(shifts.map((shift) => prisma.shift.upsert({
+    where: { name: shift.name },
+    update: {},
+    create: shift
+  })));
+};
+
 const assertCanManagePayload = async (req: Request, roleId: string, divisionId: string, targetUserId?: string) => {
   const actor = await getActor(req);
   if (!actor) return 'User login tidak valid';
@@ -128,6 +142,7 @@ export const getUsers = async (req: Request, res: Response) => {
         role: true,
         division: true,
         branch: true,
+        shift: true,
         supervisor: { select: { id: true, name: true } },
         leaveBalances: true
       },
@@ -148,7 +163,7 @@ export const getUserById = async (req: Request, res: Response) => {
 
     const user = await prisma.user.findUnique({
       where: { id: req.params.id },
-      include: { role: true, division: true, branch: true, leaveBalances: true, supervisor: { select: { id: true, name: true } } }
+      include: { role: true, division: true, branch: true, shift: true, leaveBalances: true, supervisor: { select: { id: true, name: true } } }
     });
 
     if (!user || user.deletedAt) return errorResponse(res, 'User tidak ditemukan', null, 404);
@@ -171,7 +186,7 @@ export const getUserById = async (req: Request, res: Response) => {
 
 export const createUser = async (req: Request, res: Response) => {
   try {
-    const { email, password, name, roleId, divisionId, supervisorId, totalQuota, branchId } = req.body;
+    const { email, password, name, roleId, divisionId, supervisorId, totalQuota, branchId, shiftId } = req.body;
     const policyError = await assertCanManagePayload(req, roleId, divisionId);
     if (policyError) return errorResponse(res, policyError, null, 403);
 
@@ -191,10 +206,11 @@ export const createUser = async (req: Request, res: Response) => {
         roleId,
         divisionId,
         branchId: branchId === 'none' ? null : branchId || null,
+        shiftId: shiftId === 'none' ? null : shiftId || null,
         supervisorId: actor.role.name === 'MANAGER' ? actor.id : (supervisorId === 'none' ? null : supervisorId || null),
         leaveBalances: { create: { totalQuota: Number(totalQuota || 12), usedQuota: 0 } }
       },
-      include: { role: true, division: true, branch: true, leaveBalances: true }
+      include: { role: true, division: true, branch: true, shift: true, leaveBalances: true }
     });
 
     const { password: _, ...sanitized } = user;
@@ -208,7 +224,7 @@ export const createUser = async (req: Request, res: Response) => {
 
 export const updateUser = async (req: Request, res: Response) => {
   try {
-    const { name, roleId, divisionId, supervisorId, isActive, totalQuota, branchId } = req.body;
+    const { name, roleId, divisionId, supervisorId, isActive, totalQuota, branchId, shiftId } = req.body;
     const current = await prisma.user.findUnique({
       where: { id: req.params.id },
       include: { role: true, division: true }
@@ -230,6 +246,7 @@ export const updateUser = async (req: Request, res: Response) => {
         roleId: effectiveRoleId,
         divisionId: effectiveDivisionId,
         branchId: branchId === 'none' ? null : branchId || undefined,
+        shiftId: shiftId === 'none' ? null : shiftId || undefined,
         supervisorId: actor.role.name === 'MANAGER' ? actor.id : (supervisorId === 'none' ? null : supervisorId || null),
         isActive: typeof isActive === 'boolean' ? isActive : undefined,
         leaveBalances: totalQuota ? {
@@ -239,7 +256,7 @@ export const updateUser = async (req: Request, res: Response) => {
           }
         } : undefined
       },
-      include: { role: true, division: true, branch: true, leaveBalances: true }
+      include: { role: true, division: true, branch: true, shift: true, leaveBalances: true }
     });
 
     const { password, ...sanitized } = user;
@@ -276,6 +293,7 @@ export const getUserOptions = async (req: Request, res: Response) => {
   try {
     const actor = await getActor(req);
     if (!actor) return errorResponse(res, 'User login tidak valid', null, 401);
+    await ensureDefaultShifts();
 
     const allowedRoleNames = getRoleNamesAllowedForActor(actor.role.name);
     const roleWhere = TOP_LEVEL_ROLES.includes(actor.role.name)
@@ -290,16 +308,59 @@ export const getUserOptions = async (req: Request, res: Response) => {
       ? { id: actor.id }
       : { deletedAt: null, isActive: true };
 
-    const [roles, divisions, branches, supervisors] = await Promise.all([
+    const [roles, divisions, branches, supervisors, shifts] = await Promise.all([
       prisma.role.findMany({ where: roleWhere as any, orderBy: { name: 'asc' } }),
       prisma.division.findMany({ where: divisionWhere as any, orderBy: { name: 'asc' } }),
       prisma.branch.findMany({ orderBy: { name: 'asc' } }),
-      prisma.user.findMany({ where: supervisorWhere as any, select: { id: true, name: true, email: true, role: { select: { name: true } } }, orderBy: { name: 'asc' } })
+      prisma.user.findMany({ where: supervisorWhere as any, select: { id: true, name: true, email: true, role: { select: { name: true } } }, orderBy: { name: 'asc' } }),
+      prisma.shift.findMany({ orderBy: { name: 'asc' } })
     ]);
 
-    return successResponse(res, { roles, divisions, branches, supervisors }, 'Options berhasil diambil');
+    return successResponse(res, { roles, divisions, branches, supervisors, shifts }, 'Options berhasil diambil');
   } catch (error) {
     return errorResponse(res, 'Gagal mengambil options', null, 500);
+  }
+};
+
+export const updateUserPassword = async (req: Request, res: Response) => {
+  try {
+    const actor = await getActor(req);
+    if (!actor || !TOP_LEVEL_ROLES.includes(actor.role.name)) {
+      return errorResponse(res, 'Hanya Owner/CEO/Admin yang dapat mengubah password akun', null, 403);
+    }
+
+    const { password } = req.body;
+    if (!password || String(password).length < 6) {
+      return errorResponse(res, 'Password minimal 6 karakter', null, 400);
+    }
+
+    const target = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      include: { role: true, division: true }
+    });
+
+    if (!target || target.deletedAt) {
+      return errorResponse(res, 'User tidak ditemukan', null, 404);
+    }
+
+    const hashed = await bcrypt.hash(String(password), 10);
+    await prisma.user.update({
+      where: { id: target.id },
+      data: { password: hashed }
+    });
+
+    await createNotification({
+      userId: target.id,
+      title: 'Password Akun Diubah',
+      message: `Password akun Anda telah diubah oleh ${actor.name}.`,
+      type: 'INFO',
+      link: '/profile'
+    }).catch(() => {});
+
+    await writeAuditLog(req, 'UPDATE', 'USER_PASSWORD', `Password user diubah: ${target.email}`);
+    return successResponse(res, { id: target.id }, 'Password user berhasil diperbarui');
+  } catch (error) {
+    return errorResponse(res, 'Gagal mengubah password user', null, 500);
   }
 };
 
@@ -414,14 +475,113 @@ export const getResignationRequests = async (req: Request, res: Response) => {
   }
 };
 
+export const updateResignationRequest = async (req: Request, res: Response) => {
+  try {
+    const actor = await getActor(req);
+    if (!actor) return errorResponse(res, 'User login tidak valid', null, 401);
+
+    const { status, notes, deleteAccount, directMessage } = req.body;
+    const normalizedStatus = String(status || '').toUpperCase();
+    if (!['APPROVED', 'REJECTED', 'PENDING'].includes(normalizedStatus)) {
+      return errorResponse(res, 'Status resign harus APPROVED, REJECTED, atau PENDING', null, 400);
+    }
+
+    const request = await prisma.resignationRequest.findUnique({
+      where: { id: req.params.id },
+      include: { user: { include: { role: true, division: true } } }
+    });
+
+    if (!request || request.user.deletedAt) {
+      return errorResponse(res, 'Pengajuan resign tidak ditemukan', null, 404);
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const data = await tx.resignationRequest.update({
+        where: { id: request.id },
+        data: {
+          status: normalizedStatus,
+          reviewedById: actor.id,
+          reviewedAt: new Date(),
+          notes: notes ? String(notes).trim() : request.notes
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              isActive: true,
+              role: true,
+              division: true,
+              branch: true
+            }
+          }
+        }
+      });
+
+      if (deleteAccount) {
+        await tx.user.update({
+          where: { id: request.userId },
+          data: { isActive: false, deletedAt: new Date() }
+        });
+      }
+
+      return data;
+    });
+
+    await createNotification({
+      userId: request.userId,
+      title: `Pengajuan Resign ${normalizedStatus}`,
+      message: directMessage
+        ? String(directMessage).trim()
+        : `Pengajuan resign Anda berstatus ${normalizedStatus}${deleteAccount ? ' dan akun dinonaktifkan.' : '.'}`,
+      type: 'INFO',
+      link: '/profile',
+      metadata: { resignationRequestId: request.id, status: normalizedStatus }
+    }).catch(() => {});
+
+    await writeAuditLog(req, 'UPDATE', 'RESIGNATION', `Pengajuan resign ${request.user.name} diubah ke ${normalizedStatus}`);
+    return successResponse(res, updated, 'Status pengajuan resign berhasil diperbarui');
+  } catch (error: any) {
+    return errorResponse(res, error.message || 'Gagal memperbarui pengajuan resign', null, 500);
+  }
+};
+
+export const getMyDocuments = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    const [warnings, paklarings, payrolls] = await Promise.all([
+      prisma.warningLetter.findMany({
+        where: { employeeId: userId },
+        include: { issuedBy: { select: { id: true, name: true, role: true } } },
+        orderBy: { createdAt: 'desc' }
+      }),
+      prisma.paklaring.findMany({
+        where: { employeeId: userId },
+        include: { issuedBy: { select: { id: true, name: true, role: true } } },
+        orderBy: { createdAt: 'desc' }
+      }),
+      prisma.payroll.findMany({
+        where: { userId },
+        orderBy: { period: 'desc' },
+        take: 12
+      })
+    ]);
+
+    return successResponse(res, { warnings, paklarings, payrolls }, 'Dokumen akun berhasil diambil');
+  } catch (error) {
+    return errorResponse(res, 'Gagal mengambil dokumen akun', null, 500);
+  }
+};
+
 export const createWarningLetter = async (req: Request, res: Response) => {
   try {
     const actor = await getActor(req);
     if (!actor) return errorResponse(res, 'User login tidak valid', null, 401);
 
-    const { employeeId, reason, durationDays, notes } = req.body;
+    const { employeeId, reason, durationDays, notes, type } = req.body;
     if (!employeeId || !reason) {
-      return errorResponse(res, 'Karyawan dan alasan SP1 wajib diisi', null, 400);
+      return errorResponse(res, 'Karyawan dan alasan SP wajib diisi', null, 400);
     }
 
     const employee = await prisma.user.findUnique({
@@ -431,7 +591,7 @@ export const createWarningLetter = async (req: Request, res: Response) => {
     if (!employee || employee.deletedAt) return errorResponse(res, 'Karyawan tidak ditemukan', null, 404);
 
     if (ROLE_LEVEL[actor.role.name] < ROLE_LEVEL[employee.role.name]) {
-      return errorResponse(res, 'Tidak boleh mengeluarkan SP1 untuk jabatan di atas Anda', null, 403);
+      return errorResponse(res, 'Tidak boleh mengeluarkan SP untuk jabatan di atas Anda', null, 403);
     }
 
     const defaultSetting = await prisma.systemSetting.findUnique({ where: { key: 'SP1_DEFAULT_DURATION_DAYS' } });
@@ -443,6 +603,7 @@ export const createWarningLetter = async (req: Request, res: Response) => {
       data: {
         employeeId,
         issuedById: actor.id,
+        type: String(type || 'SP').trim().toUpperCase(),
         reason: String(reason).trim(),
         notes: notes ? String(notes).trim() : null,
         expiresAt
@@ -455,17 +616,17 @@ export const createWarningLetter = async (req: Request, res: Response) => {
 
     await createNotification({
       userId: employeeId,
-      title: 'SP1 Diterbitkan',
-      message: `SP1 diterbitkan oleh ${actor.name}. Berlaku sampai ${expiresAt.toISOString().slice(0, 10)}.`,
+      title: 'SP Diterbitkan',
+      message: `Surat Peringatan diterbitkan oleh ${actor.name}. Berlaku sampai ${expiresAt.toISOString().slice(0, 10)}.`,
       type: 'WARNING',
       link: '/profile',
       metadata: { warningLetterId: warning.id }
     });
 
-    await writeAuditLog(req, 'CREATE', 'WARNING_LETTER', `SP1 dibuat untuk ${employee.name}`);
-    return successResponse(res, warning, 'SP1 berhasil diterbitkan', 201);
+    await writeAuditLog(req, 'CREATE', 'WARNING_LETTER', `SP dibuat untuk ${employee.name}`);
+    return successResponse(res, warning, 'SP berhasil diterbitkan', 201);
   } catch (error: any) {
-    return errorResponse(res, error.message || 'Gagal menerbitkan SP1', null, 500);
+    return errorResponse(res, error.message || 'Gagal menerbitkan SP', null, 500);
   }
 };
 
@@ -484,9 +645,9 @@ export const getWarningLetters = async (req: Request, res: Response) => {
     });
 
     const setting = await prisma.systemSetting.findUnique({ where: { key: 'SP1_DEFAULT_DURATION_DAYS' } });
-    return successResponse(res, { warnings, defaultDurationDays: Number(setting?.value || 90) }, 'SP1 berhasil diambil');
+    return successResponse(res, { warnings, defaultDurationDays: Number(setting?.value || 90) }, 'SP berhasil diambil');
   } catch (error) {
-    return errorResponse(res, 'Gagal mengambil SP1', null, 500);
+    return errorResponse(res, 'Gagal mengambil SP', null, 500);
   }
 };
 
@@ -494,7 +655,7 @@ export const updateWarningSettings = async (req: Request, res: Response) => {
   try {
     const actorRole = (req as any).user.role;
     if (!['OWNER', 'CEO', 'ADMIN'].includes(actorRole)) {
-      return errorResponse(res, 'Hanya CEO/Admin/Owner yang dapat mengubah durasi default SP1', null, 403);
+      return errorResponse(res, 'Hanya CEO/Admin/Owner yang dapat mengubah durasi default SP', null, 403);
     }
 
     const durationDays = Math.max(1, Number(req.body.durationDays || 90));
@@ -504,13 +665,13 @@ export const updateWarningSettings = async (req: Request, res: Response) => {
       create: {
         key: 'SP1_DEFAULT_DURATION_DAYS',
         value: String(durationDays),
-        description: 'Durasi default SP1 dalam hari'
+        description: 'Durasi default SP dalam hari'
       }
     });
 
-    return successResponse(res, setting, 'Durasi default SP1 berhasil diperbarui');
+    return successResponse(res, setting, 'Durasi default SP berhasil diperbarui');
   } catch (error) {
-    return errorResponse(res, 'Gagal memperbarui durasi SP1', null, 500);
+    return errorResponse(res, 'Gagal memperbarui durasi SP', null, 500);
   }
 };
 

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getProducts, createProduct, createProductionRecord, getProductionRecords, getProductStockSummary, setInitialProductStock, useMaterials } from '../controllers/production.controller';
+import { getProducts, createProduct, createProductionRecord, createProductionRecordsBulk, getProductionRecords, getProductStockSummary, setInitialProductStock, useMaterials } from '../controllers/production.controller';
 import { authenticate, authorizeDivision, authorizeRole } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -10,6 +10,7 @@ router.use(authenticate);
 router.post('/products', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER']), createProduct);
 router.post('/stock/initial', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER']), setInitialProductStock);
 router.post('/records', authorizeDivision(['PRODUKSI']), createProductionRecord);
+router.post('/records/bulk', authorizeDivision(['PRODUKSI']), createProductionRecordsBulk);
 router.post('/materials/use', authorizeDivision(['PRODUKSI']), useMaterials);
 
 // Read access can be broader

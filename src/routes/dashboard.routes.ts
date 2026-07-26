@@ -6,7 +6,8 @@ import {
   getProductionStatistics,
   getCriticalStock,
   getBranchPerformance,
-  getEmployeePerformanceLeaderboard
+  getEmployeePerformanceLeaderboard,
+  getEmployeeStatistics
 } from '../controllers/dashboard.controller';
 import { authenticate, authorizeRole } from '../middlewares/auth.middleware';
 
@@ -27,5 +28,6 @@ router.get('/production-stats', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'M
 router.get('/critical-stock', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER']), getCriticalStock);
 router.get('/branch-performance', authorizeRole(['OWNER', 'CEO', 'ADMIN', 'MANAGER']), getBranchPerformance);
 router.get('/employee-leaderboard', authorizeRole(['OWNER', 'CEO', 'ADMIN']), getEmployeePerformanceLeaderboard);
+router.get('/employees/:id/statistics', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER', 'LEADER']), getEmployeeStatistics);
 
 export default router;

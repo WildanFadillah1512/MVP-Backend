@@ -199,6 +199,18 @@ export const getStaffDashboard = async (req: Request, res: Response) => {
       include: { target: true }
     });
 
+    const activeTasks = await prisma.task.findMany({
+      where: {
+        assignedTo: userId,
+        status: { in: ['TODO', 'IN_PROGRESS', 'REVIEW'] as any }
+      },
+      orderBy: [
+        { dueDate: 'asc' },
+        { createdAt: 'desc' }
+      ],
+      take: 10
+    });
+
     // Laporan bulan ini
     const reportsThisMonth = await prisma.dailyReport.count({
       where: { userId, date: { gte: thisMonth }, status: ReportStatus.SUBMITTED }
@@ -248,6 +260,7 @@ export const getStaffDashboard = async (req: Request, res: Response) => {
       attendance: todayAttendance,
       leaveBalance,
       activeTargets: targets,
+      activeTasks,
       monthlyStats: {
         attendance: attendanceThisMonth,
         reports: reportsThisMonth,
@@ -345,7 +358,7 @@ export const getProductionStatistics = async (req: Request, res: Response) => {
     }, 'Production statistics retrieved');
   } catch (error: any) {
     console.error('Error getting production statistics:', error);
-    return errorResponse(res, error.message, 500);
+    return errorResponse(res, error.message, null, 500);
   }
 };
 
@@ -374,7 +387,7 @@ export const getCriticalStock = async (req: Request, res: Response) => {
     }, 'Critical stock data retrieved');
   } catch (error: any) {
     console.error('Error getting critical stock:', error);
-    return errorResponse(res, error.message, 500);
+    return errorResponse(res, error.message, null, 500);
   }
 };
 
@@ -489,6 +502,78 @@ export const getEmployeePerformanceLeaderboard = async (req: Request, res: Respo
     return successResponse(res, leaderboard, 'Data leaderboard performa karyawan berhasil diambil');
   } catch (error: any) {
     console.error('Error getting leaderboard:', error);
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+export const getEmployeeStatistics = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const workingDays = Math.max(1, Math.ceil((today.getTime() - thisMonth.getTime()) / (1000 * 60 * 60 * 24)));
+
+    const user = await prisma.user.findFirst({
+      where: { id, deletedAt: null },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: { select: { name: true } },
+        division: { select: { name: true } },
+        attendances: { where: { date: { gte: thisMonth }, status: { in: [AttendanceStatus.HADIR, AttendanceStatus.TELAT] } } },
+        dailyReports: { where: { date: { gte: thisMonth }, status: { in: [ReportStatus.SUBMITTED, ReportStatus.LOCKED] } } },
+        dailyUploads: { where: { createdAt: { gte: thisMonth } } },
+        overtimeRecords: { where: { date: { gte: thisMonth }, status: 'APPROVED' } },
+        targetAssignments: { include: { target: true } },
+        payrolls: { orderBy: { period: 'desc' }, take: 3 },
+        leaveRequests: { orderBy: { createdAt: 'desc' }, take: 5 }
+      }
+    });
+
+    if (!user) return errorResponse(res, 'Karyawan tidak ditemukan', null, 404);
+
+    const attendanceScore = Math.min(100, Math.round((user.attendances.length / workingDays) * 100));
+    const reportScore = Math.min(100, Math.round((user.dailyReports.length / workingDays) * 100));
+    const targetScore = user.targetAssignments.length > 0
+      ? Math.round(user.targetAssignments.reduce((sum, item) => sum + Math.min(100, (item.currentValue / Math.max(1, item.target.targetValue)) * 100), 0) / user.targetAssignments.length)
+      : 0;
+    const uploadScore = Math.min(100, Math.round((user.dailyUploads.length / workingDays) * 100));
+    const overtimeHours = user.overtimeRecords.reduce((sum, item) => sum + item.totalHours, 0);
+    const kpiScore = Math.round((attendanceScore * 0.3) + (reportScore * 0.3) + (targetScore * 0.4));
+
+    return successResponse(res, {
+      employee: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role.name,
+        division: user.division.name
+      },
+      period: thisMonth.toISOString().slice(0, 7),
+      summary: {
+        attendanceDays: user.attendances.length,
+        reportDays: user.dailyReports.length,
+        uploadCount: user.dailyUploads.length,
+        overtimeHours,
+        activeTargets: user.targetAssignments.filter((item) => !item.isCompleted).length,
+        completedTargets: user.targetAssignments.filter((item) => item.isCompleted).length
+      },
+      scores: {
+        attendanceScore,
+        reportScore,
+        targetScore,
+        uploadScore,
+        kpiScore,
+        grade: kpiScore >= 90 ? 'A' : kpiScore >= 75 ? 'B' : kpiScore >= 60 ? 'C' : 'D'
+      },
+      targets: user.targetAssignments,
+      recentPayrolls: user.payrolls,
+      recentLeaves: user.leaveRequests
+    }, 'Statistik karyawan berhasil diambil');
+  } catch (error: any) {
+    console.error('Error getting employee statistics:', error);
     return errorResponse(res, error.message, 500);
   }
 };

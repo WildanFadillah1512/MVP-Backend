@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { errorResponse, successResponse } from '../utils/response';
 import { startOfMonth, endOfMonth } from 'date-fns';
+import { createNotification } from '../services/notification.service';
 
 const getUserRole = (user: any) => user.role?.name || user.role;
 
@@ -202,6 +203,15 @@ export const generatePayroll = async (req: Request, res: Response) => {
       }
     });
 
+    await createNotification({
+      userId,
+      title: 'Slip Gaji Dibuat',
+      message: `Slip gaji periode ${periodDate.toISOString().slice(0, 7)} sudah dibuat dan menunggu approval.`,
+      type: 'INFO',
+      link: '/payroll',
+      metadata: { payrollId: payroll.id }
+    }).catch(() => {});
+
     return successResponse(res, payroll, 'Payroll generated successfully');
   } catch (error: any) {
     return errorResponse(res, error.message, 500);
@@ -236,6 +246,15 @@ export const approvePayroll = async (req: Request, res: Response) => {
       }
     });
 
+    await createNotification({
+      userId: payroll.user.id,
+      title: 'Slip Gaji Disetujui',
+      message: 'Slip gaji Anda sudah disetujui CEO.',
+      type: 'INFO',
+      link: '/payroll',
+      metadata: { payrollId: payroll.id }
+    }).catch(() => {});
+
     return successResponse(res, payroll, 'Payroll approved successfully');
   } catch (error: any) {
     return errorResponse(res, error.message, 500);
@@ -257,8 +276,18 @@ export const markPayrollAsPaid = async (req: Request, res: Response) => {
       data: {
         status: 'PAID',
         paidAt: new Date()
-      }
+      },
+      include: { user: { select: { id: true, name: true } } }
     });
+
+    await createNotification({
+      userId: payroll.user.id,
+      title: 'Slip Gaji Dibayarkan',
+      message: 'Slip gaji Anda sudah ditandai dibayarkan.',
+      type: 'INFO',
+      link: '/payroll',
+      metadata: { payrollId: payroll.id }
+    }).catch(() => {});
 
     return successResponse(res, payroll, 'Payroll marked as paid successfully');
   } catch (error: any) {

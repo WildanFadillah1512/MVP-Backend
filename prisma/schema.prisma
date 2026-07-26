@@ -114,6 +114,8 @@ model User {
   attendances       Attendance[]
   leaveBalances     LeaveBalance?
   leaveRequests     LeaveRequest[]
+  leaveCancellationRequests LeaveCancellationRequest[] @relation("LeaveCancellationRequester")
+  leaveCancellationReviews  LeaveCancellationRequest[] @relation("LeaveCancellationReviewer")
   dailyReports      DailyReport[]
   dailyUploads      DailyUpload[]
   targetAssignments TargetAssignment[]
@@ -135,6 +137,8 @@ model User {
   paklaringReceived Paklaring[] @relation("PaklaringEmployee")
   payrolls          Payroll[]
   resignationRequests ResignationRequest[]
+  cashierReportsCreated CashierReport[] @relation("CashierReportCreator")
+  announcementsCreated Announcement[] @relation("AnnouncementCreator")
   warningLettersReceived WarningLetter[] @relation("WarningLetterEmployee")
   warningLettersIssued WarningLetter[] @relation("WarningLetterIssuer")
   materialRequestsCreated MaterialRequest[] @relation("MaterialRequestRequester")
@@ -208,6 +212,29 @@ model LeaveRequest {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  cancellationRequests LeaveCancellationRequest[]
+}
+
+model LeaveCancellationRequest {
+  id             String       @id @default(uuid())
+  leaveRequestId String
+  leaveRequest   LeaveRequest @relation(fields: [leaveRequestId], references: [id])
+  userId         String
+  user           User         @relation("LeaveCancellationRequester", fields: [userId], references: [id])
+  reason         String?
+  status         LeaveStatus  @default(PENDING)
+  reviewerId     String?
+  reviewer       User?        @relation("LeaveCancellationReviewer", fields: [reviewerId], references: [id])
+  reviewedAt     DateTime?
+  notes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([leaveRequestId])
+  @@index([userId, status])
+  @@index([reviewerId])
 }
 
 // -----------------------------------------
@@ -564,7 +591,7 @@ model WarningLetter {
   employee   User     @relation("WarningLetterEmployee", fields: [employeeId], references: [id])
   issuedById String
   issuedBy   User     @relation("WarningLetterIssuer", fields: [issuedById], references: [id])
-  type       String   @default("SP1")
+  type       String   @default("SP")
   reason     String
   issuedAt   DateTime @default(now())
   expiresAt  DateTime
@@ -582,6 +609,8 @@ model CashierReport {
   id            String   @id @default(uuid())
   branchId      String
   branch        Branch   @relation(fields: [branchId], references: [id])
+  createdById   String?
+  createdBy     User?    @relation("CashierReportCreator", fields: [createdById], references: [id])
   date          DateTime @db.Date
   totalCash     Float    @default(0)
   totalTransfer Float    @default(0)
@@ -593,6 +622,27 @@ model CashierReport {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([createdById])
+}
+
+model Announcement {
+  id          String   @id @default(uuid())
+  title       String
+  message     String
+  fileUrl     String?
+  fileName    String?
+  isPopup     Boolean  @default(true)
+  isActive    Boolean  @default(true)
+  createdById String
+  createdBy   User     @relation("AnnouncementCreator", fields: [createdById], references: [id])
+  expiresAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, createdAt])
+  @@index([createdById])
 }
 
 // -----------------------------------------
@@ -607,6 +657,9 @@ model WarehouseItem {
   minStock     Int    @default(10)
   currentStock Int    @default(0)
   unit         String
+  purchasePrice Float @default(0)
+  purchaseGram  Float @default(0)
+  pricePerGram  Float @default(0)
   isActive     Boolean @default(true)
 
   movements WarehouseMovement[]
@@ -900,6 +953,8 @@ model Task {
   assignedBy  String
   status      TaskStatus   @default(TODO)
   priority    TaskPriority @default(MEDIUM)
+  scheduleType String       @default("ONE_TIME") // ONE_TIME, DAILY, MONTHLY
+  scheduleDate DateTime?    @db.Date
   dueDate     DateTime?
   completedAt DateTime?
   attachments String? // JSON array of file URLs
@@ -909,6 +964,7 @@ model Task {
 
   @@index([assignedTo, status])
   @@index([assignedBy])
+  @@index([scheduleType, scheduleDate])
   @@index([dueDate])
 }
 

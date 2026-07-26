@@ -39,6 +39,20 @@ async function main() {
     });
   }
 
+  const shifts = [
+    { name: 'Pagi', startTime: '07:00', endTime: '15:00' },
+    { name: 'Middle', startTime: '11:00', endTime: '19:00' },
+    { name: 'Malam', startTime: '19:00', endTime: '03:00' },
+  ];
+
+  for (const shift of shifts) {
+    await prisma.shift.upsert({
+      where: { name: shift.name },
+      update: { startTime: shift.startTime, endTime: shift.endTime },
+      create: shift,
+    });
+  }
+
   // 3. Keep Existing Users (Don't overwrite unless they don't exist)
 
   // Owner

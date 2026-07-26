@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getItems, createItem, createMovement, getMovements, getLowStockRecommendations, deleteItem } from '../controllers/warehouse.controller';
+import { getItems, createItem, updateItem, createMovement, getMovements, getLowStockRecommendations, deleteItem } from '../controllers/warehouse.controller';
 import { authenticate, authorizeDivision, authorizeRole } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -8,6 +8,7 @@ router.use(authenticate);
 
 router.get('/items', getItems);
 router.post('/items', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER']), createItem);
+router.put('/items/:id', updateItem);
 router.delete('/items/:id', deleteItem);
 router.get('/movements', getMovements);
 router.get('/recommendations', getLowStockRecommendations);

@@ -26,6 +26,8 @@ import recipeRoutes from './recipe.routes';
 import fileUploadRoutes from './file-upload.routes';
 import materialRequestRoutes from './material-request.routes';
 import shiftRoutes from './shift.routes';
+import announcementRoutes from './announcement.routes';
+import settingsRoutes from './settings.routes';
 
 const router = Router();
 
@@ -56,5 +58,7 @@ router.use('/payroll', payrollRoutes);
 router.use('/file-upload', fileUploadRoutes);
 router.use('/material-requests', materialRequestRoutes);
 router.use('/shifts', shiftRoutes);
+router.use('/announcements', announcementRoutes);
+router.use('/settings', settingsRoutes);
 
 export default router;

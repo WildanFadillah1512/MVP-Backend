@@ -4,6 +4,7 @@ import prisma from '../utils/prisma';
 import { successResponse, errorResponse } from '../utils/response';
 import { writeAuditLog } from '../utils/audit';
 import { ReportStatus, StockMovementType } from '@prisma/client';
+import { createBulkNotifications } from '../services/notification.service';
 
 const TOP_MANAGEMENT = ['OWNER', 'CEO', 'ADMIN'];
 
@@ -26,6 +27,10 @@ const getSubordinateIds = async (userId: string) => {
 export const createReport = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { supervisor: true, division: true }
+    });
     const { description, output, obstacles, notes, tasks } = req.body;
     
     const today = new Date();
@@ -106,20 +111,63 @@ export const createReport = async (req: Request, res: Response) => {
             data: { currentValue: { increment: Number(quantity) } }
           });
         } else if (taskType === 'STOCK_OUT' && warehouseItemId && quantity) {
+          const qty = Number(quantity);
+          const item = await prisma.warehouseItem.findFirst({
+            where: { id: warehouseItemId, isActive: true }
+          });
+          if (!item) {
+            return errorResponse(res, 'Barang gudang tidak ditemukan', null, 404);
+          }
+          if (item.currentStock < qty) {
+            return errorResponse(res, `Stok ${item.name} tidak cukup. Sisa: ${item.currentStock}`, null, 400);
+          }
+
           await prisma.warehouseMovement.create({
             data: {
               warehouseItemId,
               type: StockMovementType.OUT,
-              quantity: Number(quantity),
-              notes: `Terpakai oleh ${userId} (Laporan Harian)`
+              quantity: qty,
+              notes: `Terpakai oleh ${currentUser?.name || userId} (Laporan Harian)`
             }
           });
           await prisma.warehouseItem.update({
             where: { id: warehouseItemId },
-            data: { currentStock: { decrement: Number(quantity) } }
+            data: { currentStock: { decrement: qty } }
           });
+
+          const targetUsers = await prisma.user.findMany({
+            where: {
+              isActive: true,
+              deletedAt: null,
+              OR: [
+                { division: { name: 'GUDANG' } },
+                { role: { name: { in: ['OWNER', 'CEO', 'ADMIN'] as any } } }
+              ]
+            },
+            select: { id: true }
+          });
+
+          await createBulkNotifications(targetUsers.map((target) => ({
+            userId: target.id,
+            title: 'Pemakaian Barang Gudang',
+            message: `${currentUser?.name || 'Staff'} memakai ${qty} ${item.unit} ${item.name} dari laporan harian.`,
+            type: 'INFO',
+            link: '/warehouse',
+            metadata: { warehouseItemId, reportId }
+          }))).catch(() => {});
         }
       }
+    }
+
+    if (currentUser?.supervisorId) {
+      await createBulkNotifications([{
+        userId: currentUser.supervisorId,
+        title: 'Laporan Harian Disubmit',
+        message: `${currentUser.name} sudah submit laporan harian.`,
+        type: 'INFO',
+        link: '/daily-reports',
+        metadata: { reportId, userId }
+      }]).catch(() => {});
     }
 
     await writeAuditLog(req, 'CREATE', 'DAILY_REPORT', 'Laporan harian disubmit');

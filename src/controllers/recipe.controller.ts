@@ -5,6 +5,12 @@ import { writeAuditLog } from '../utils/audit';
 
 const getUserRole = (user: any) => user.role?.name || user.role;
 
+const resolveIngredientUnitPrice = (item: any, override?: any) => {
+  const manual = Number(override || 0);
+  if (manual > 0) return manual;
+  return Number(item?.pricePerGram || 0);
+};
+
 // Get all recipes for a product
 export const getProductRecipes = async (req: Request, res: Response) => {
   try {
@@ -50,7 +56,7 @@ export const getAllRecipes = async (req: Request, res: Response) => {
       }
       acc[productId].ingredients.push({
         id: recipe.id,
-        ingredient: recipe.ingredient,
+        ingredient: { ...recipe.ingredient, unit: 'gram' },
         qtyNeeded: recipe.qtyNeeded,
         unitPrice: recipe.unitPrice,
         totalPrice: recipe.qtyNeeded * recipe.unitPrice
@@ -95,6 +101,10 @@ export const setProductRecipe = async (req: Request, res: Response) => {
         });
       }
 
+      const item = await tx.warehouseItem.findUnique({ where: { id: warehouseItemId } });
+      if (!item) throw new Error('Bahan gudang tidak ditemukan');
+      const resolvedUnitPrice = resolveIngredientUnitPrice(item, unitPrice);
+
       return tx.erpProductRecipe.upsert({
       where: {
         productId_warehouseItemId: {
@@ -104,13 +114,13 @@ export const setProductRecipe = async (req: Request, res: Response) => {
       },
       update: {
         qtyNeeded: Number(qtyNeeded),
-        unitPrice: Number(unitPrice || 0)
+        unitPrice: resolvedUnitPrice
       },
       create: {
         productId,
         warehouseItemId,
         qtyNeeded: Number(qtyNeeded),
-        unitPrice: Number(unitPrice || 0)
+        unitPrice: resolvedUnitPrice
       },
       include: {
         product: true,
@@ -152,6 +162,10 @@ export const setProductRecipeBulk = async (req: Request, res: Response) => {
 
       const results = [];
       for (const ing of ingredients) {
+        const item = await tx.warehouseItem.findUnique({ where: { id: ing.warehouseItemId } });
+        if (!item) throw new Error('Bahan gudang tidak ditemukan');
+        const resolvedUnitPrice = resolveIngredientUnitPrice(item, ing.unitPrice);
+
         const recipe = await tx.erpProductRecipe.upsert({
           where: {
             productId_warehouseItemId: {
@@ -161,13 +175,13 @@ export const setProductRecipeBulk = async (req: Request, res: Response) => {
           },
           update: {
             qtyNeeded: Number(ing.qtyNeeded),
-            unitPrice: Number(ing.unitPrice || 0)
+            unitPrice: resolvedUnitPrice
           },
           create: {
             productId,
             warehouseItemId: ing.warehouseItemId,
             qtyNeeded: Number(ing.qtyNeeded),
-            unitPrice: Number(ing.unitPrice || 0)
+            unitPrice: resolvedUnitPrice
           },
           include: {
             product: true,

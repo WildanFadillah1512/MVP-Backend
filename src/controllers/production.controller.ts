@@ -2,6 +2,114 @@ import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { successResponse, errorResponse } from '../utils/response';
 import { writeAuditLog } from '../utils/audit';
+import { createBulkNotifications } from '../services/notification.service';
+
+const createProductionRecordInTx = async (tx: any, payload: any) => {
+  const { productId, quantity, rejectQty, rejectReason, date, notes } = payload;
+  const qty = Number(quantity);
+  const rejected = Math.max(0, Number(rejectQty || 0));
+  const acceptedQty = Math.max(0, qty - rejected);
+
+  if (!productId || qty <= 0) {
+    throw new Error('Produk dan jumlah produksi wajib diisi');
+  }
+
+  if (rejected > qty) {
+    throw new Error('Jumlah reject tidak boleh lebih besar dari jumlah produksi');
+  }
+
+  if (rejected > 0 && !rejectReason) {
+    throw new Error('Alasan reject wajib diisi jika ada produk reject');
+  }
+
+  const newRecord = await tx.productionRecord.create({
+    data: {
+      productId,
+      quantity: qty,
+      rejectQty: rejected,
+      date: new Date(date || Date.now()),
+      notes
+    },
+    include: { product: true }
+  });
+
+  if (rejected > 0) {
+    await tx.productionReject.create({
+      data: {
+        productionId: newRecord.id,
+        productId,
+        rejectQty: rejected,
+        rejectReason,
+        date: new Date(date || Date.now()),
+        notes
+      }
+    });
+  }
+
+  const recipes = acceptedQty > 0
+    ? await tx.erpProductRecipe.findMany({
+        where: { productId },
+        include: { ingredient: true, product: true }
+      })
+    : [];
+
+  if (recipes.length > 0) {
+    const outputQtyPerBatch = Math.max(1, recipes[0].product.recipeOutputQty || 1);
+    const requiredBatchCount = Math.ceil(acceptedQty / outputQtyPerBatch);
+
+    for (const recipe of recipes) {
+      const requiredQty = Math.ceil(recipe.qtyNeeded * requiredBatchCount);
+      if (recipe.ingredient.currentStock < requiredQty) {
+        throw new Error(`Stok ${recipe.ingredient.name} tidak mencukupi. Butuh: ${requiredQty}, Tersedia: ${recipe.ingredient.currentStock}`);
+      }
+    }
+
+    for (const recipe of recipes) {
+      const requiredQty = Math.ceil(recipe.qtyNeeded * requiredBatchCount);
+      await tx.warehouseItem.update({
+        where: { id: recipe.warehouseItemId },
+        data: { currentStock: { decrement: requiredQty } }
+      });
+
+      await tx.warehouseMovement.create({
+        data: {
+          warehouseItemId: recipe.warehouseItemId,
+          type: 'OUT',
+          quantity: requiredQty,
+          date: new Date(date || Date.now()),
+          notes: `Auto resep produksi ${newRecord.product.name} (${acceptedQty} produk baik, ${requiredBatchCount} batch)`
+        }
+      });
+    }
+  }
+
+  if (acceptedQty > 0) {
+    await tx.productStockMovement.create({
+      data: {
+        productId,
+        type: 'IN',
+        quantity: acceptedQty,
+        reference: `PROD-${newRecord.id}`,
+        notes: rejected > 0 ? `Hasil produksi bagus (${acceptedQty}); reject ${rejected}` : 'Hasil Produksi'
+      }
+    });
+  }
+
+  const productionDate = new Date(date || Date.now());
+  const targetMonth = new Date(productionDate.getFullYear(), productionDate.getMonth(), 1);
+  const existingTarget = await tx.productionTarget.findUnique({
+    where: { productId_targetMonth: { productId, targetMonth } }
+  });
+
+  if (existingTarget) {
+    await tx.productionTarget.update({
+      where: { productId_targetMonth: { productId, targetMonth } },
+      data: { actualQty: { increment: acceptedQty } }
+    });
+  }
+
+  return newRecord;
+};
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -33,128 +141,78 @@ export const createProductionRecord = async (req: Request, res: Response) => {
       return errorResponse(res, 'Alasan reject wajib diisi jika ada produk reject', null, 400);
     }
     
-    const record = await prisma.$transaction(async (tx) => {
-      // Create production record
-      const newRecord = await tx.productionRecord.create({
-        data: {
-          productId,
-          quantity: qty,
-          rejectQty: rejected,
-          date: new Date(date),
-          notes
-        },
-        include: {
-          product: true
-        }
-      });
+    const record = await prisma.$transaction((tx) => createProductionRecordInTx(tx, req.body));
 
-      if (rejected > 0) {
-        await tx.productionReject.create({
-          data: {
-            productionId: newRecord.id,
-            productId,
-            rejectQty: rejected,
-            rejectReason,
-            date: new Date(date),
-            notes
-          }
-        });
-      }
-
-      const recipes = acceptedQty > 0
-        ? await tx.erpProductRecipe.findMany({
-            where: { productId },
-            include: {
-              ingredient: true,
-              product: true
-            }
-          })
-        : [];
-
-      if (recipes.length > 0) {
-        const outputQtyPerBatch = Math.max(1, recipes[0].product.recipeOutputQty || 1);
-        const requiredBatchCount = Math.ceil(acceptedQty / outputQtyPerBatch);
-
-        for (const recipe of recipes) {
-          const requiredQty = Math.ceil(recipe.qtyNeeded * requiredBatchCount);
-          if (recipe.ingredient.currentStock < requiredQty) {
-            throw new Error(`Stok ${recipe.ingredient.name} tidak mencukupi. Butuh: ${requiredQty}, Tersedia: ${recipe.ingredient.currentStock}`);
-          }
-        }
-
-        for (const recipe of recipes) {
-          const requiredQty = Math.ceil(recipe.qtyNeeded * requiredBatchCount);
-          await tx.warehouseItem.update({
-            where: { id: recipe.warehouseItemId },
-            data: {
-              currentStock: {
-                decrement: requiredQty
-              }
-            }
-          });
-
-          await tx.warehouseMovement.create({
-            data: {
-              warehouseItemId: recipe.warehouseItemId,
-              type: 'OUT',
-              quantity: requiredQty,
-              date: new Date(date),
-              notes: `Auto resep produksi ${newRecord.product.name} (${acceptedQty} produk baik, ${requiredBatchCount} batch)`
-            }
-          });
-        }
-      }
-
-      // Add only accepted products to finished goods stock.
-      if (acceptedQty > 0) {
-        await tx.productStockMovement.create({
-          data: {
-            productId,
-            type: 'IN',
-            quantity: acceptedQty,
-            reference: `PROD-${newRecord.id}`,
-            notes: rejected > 0 ? `Hasil produksi bagus (${acceptedQty}); reject ${rejected}` : 'Hasil Produksi'
-          }
-        });
-      }
-
-      // Update Production Target actualQty for current month
-      const productionDate = new Date(date);
-      const targetMonth = new Date(productionDate.getFullYear(), productionDate.getMonth(), 1);
-
-      const existingTarget = await tx.productionTarget.findUnique({
-        where: {
-          productId_targetMonth: {
-            productId,
-            targetMonth,
-          }
-        }
-      });
-
-      if (existingTarget) {
-        await tx.productionTarget.update({
-          where: {
-            productId_targetMonth: {
-              productId,
-              targetMonth,
-            }
-          },
-          data: {
-            actualQty: {
-              increment: acceptedQty
-            }
-          }
-        });
-      }
-
-      return newRecord;
+    const targetUsers = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        deletedAt: null,
+        OR: [
+          { division: { name: 'GUDANG' } },
+          { role: { name: { in: ['OWNER', 'CEO', 'ADMIN', 'GM'] as any } } }
+        ]
+      },
+      select: { id: true }
     });
+
+    await createBulkNotifications(targetUsers.map((target) => ({
+      userId: target.id,
+      title: 'Produksi Baru Dicatat',
+      message: `${record.product.name}: ${acceptedQty} stok masuk, ${rejected} reject. Bahan resep otomatis keluar dari gudang.`,
+      type: 'INFO',
+      link: '/production',
+      metadata: { productionRecordId: record.id, productId }
+    }))).catch(() => {});
 
     await writeAuditLog(req, 'CREATE', 'PRODUCTION', `Laporan produksi ${record.product.name} sebanyak ${qty} unit, reject ${rejected}, stok masuk ${acceptedQty}`);
     return successResponse(res, record, 'Laporan produksi berhasil disimpan & target terupdate');
   } catch (error: any) {
     console.error('Error create production record:', error);
     return errorResponse(res, error.message || 'Terjadi kesalahan menyimpan produksi', null, 500);
+  }
+};
+
+export const createProductionRecordsBulk = async (req: Request, res: Response) => {
+  try {
+    const { records } = req.body;
+    if (!Array.isArray(records) || records.length === 0) {
+      return errorResponse(res, 'Minimal satu laporan produksi wajib diisi', null, 400);
+    }
+
+    const saved = await prisma.$transaction(async (tx) => {
+      const results = [];
+      for (const record of records) {
+        results.push(await createProductionRecordInTx(tx, record));
+      }
+      return results;
+    });
+
+    const targetUsers = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        deletedAt: null,
+        OR: [
+          { division: { name: 'GUDANG' } },
+          { role: { name: { in: ['OWNER', 'CEO', 'ADMIN', 'GM'] as any } } }
+        ]
+      },
+      select: { id: true }
+    });
+
+    await createBulkNotifications(targetUsers.map((target) => ({
+      userId: target.id,
+      title: 'Bulk Produksi Disimpan',
+      message: `${saved.length} laporan produksi disimpan. Stok bahan gudang sudah disesuaikan otomatis.`,
+      type: 'INFO',
+      link: '/production',
+      metadata: { productionRecordIds: saved.map((item: any) => item.id) }
+    }))).catch(() => {});
+
+    await writeAuditLog(req, 'CREATE', 'PRODUCTION', `Bulk laporan produksi disimpan: ${saved.length} item`);
+    return successResponse(res, saved, `${saved.length} laporan produksi berhasil disimpan`);
+  } catch (error: any) {
+    console.error('Error create bulk production records:', error);
+    return errorResponse(res, error.message || 'Gagal menyimpan beberapa laporan produksi', null, 500);
   }
 };
 

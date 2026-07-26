@@ -3,6 +3,23 @@ import prisma from '../utils/prisma';
 import { successResponse, errorResponse } from '../utils/response';
 import { writeAuditLog } from '../utils/audit';
 import { StockMovementType } from '@prisma/client';
+import { createBulkNotifications } from '../services/notification.service';
+
+const buildItemCode = async (name: string) => {
+  const prefix = name
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '')
+    .slice(0, 6) || 'ITEM';
+  const count = await prisma.warehouseItem.count();
+  return `${prefix}-${String(count + 1).padStart(4, '0')}`;
+};
+
+const calculatePricePerGram = (purchasePrice?: number, purchaseGram?: number) => {
+  const price = Number(purchasePrice || 0);
+  const gram = Number(purchaseGram || 0);
+  return price > 0 && gram > 0 ? price / gram : 0;
+};
 
 export const getItems = async (req: Request, res: Response) => {
   try {
@@ -18,19 +35,25 @@ export const getItems = async (req: Request, res: Response) => {
 
 export const createItem = async (req: Request, res: Response) => {
   try {
-    const { code, name, category, minStock, currentStock, unit } = req.body;
-    if (!code || !name || !category || !unit) {
-      return errorResponse(res, 'Kode, nama, kategori, dan unit barang wajib diisi', null, 400);
+    const { code, name, category, minStock, currentStock, unit, purchasePrice, purchaseGram } = req.body;
+    if (!name) {
+      return errorResponse(res, 'Nama barang wajib diisi', null, 400);
     }
 
+    const itemCode = code ? String(code).trim().toUpperCase() : await buildItemCode(String(name));
+    const price = Number(purchasePrice || 0);
+    const gram = Number(purchaseGram || 0);
     const item = await prisma.warehouseItem.create({
       data: {
-        code: String(code).trim().toUpperCase(),
+        code: itemCode,
         name: String(name).trim(),
-        category: String(category).trim(),
+        category: String(category || 'Bahan Baku').trim(),
         minStock: Number(minStock || 0),
         currentStock: Number(currentStock || 0),
-        unit: String(unit).trim()
+        unit: String(unit || 'gram').trim(),
+        purchasePrice: price,
+        purchaseGram: gram,
+        pricePerGram: calculatePricePerGram(price, gram)
       }
     });
 
@@ -52,6 +75,47 @@ export const createItem = async (req: Request, res: Response) => {
       return errorResponse(res, 'Kode barang sudah digunakan', null, 400);
     }
     return errorResponse(res, 'Gagal membuat master barang', null, 500);
+  }
+};
+
+export const updateItem = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const role = user.role?.name || user.role;
+    const division = user.division?.name || user.division;
+    const id = String(req.params.id);
+
+    if (!['OWNER', 'CEO', 'ADMIN', 'GM', 'MANAGER'].includes(role) && !['GUDANG', 'PURCHASING'].includes(division)) {
+      return errorResponse(res, 'Anda tidak berwenang mengubah barang gudang', null, 403);
+    }
+
+    const current = await prisma.warehouseItem.findFirst({ where: { id, isActive: true } });
+    if (!current) return errorResponse(res, 'Barang tidak ditemukan', null, 404);
+
+    const price = req.body.purchasePrice !== undefined ? Number(req.body.purchasePrice || 0) : current.purchasePrice;
+    const gram = req.body.purchaseGram !== undefined ? Number(req.body.purchaseGram || 0) : current.purchaseGram;
+    const item = await prisma.warehouseItem.update({
+      where: { id },
+      data: {
+        code: req.body.code ? String(req.body.code).trim().toUpperCase() : undefined,
+        name: req.body.name ? String(req.body.name).trim() : undefined,
+        category: req.body.category ? String(req.body.category).trim() : undefined,
+        minStock: req.body.minStock !== undefined ? Number(req.body.minStock || 0) : undefined,
+        currentStock: req.body.currentStock !== undefined ? Number(req.body.currentStock || 0) : undefined,
+        unit: req.body.unit ? String(req.body.unit).trim() : undefined,
+        purchasePrice: price,
+        purchaseGram: gram,
+        pricePerGram: calculatePricePerGram(price, gram)
+      }
+    });
+
+    await writeAuditLog(req, 'UPDATE', 'WAREHOUSE_ITEM', `Master barang gudang diperbarui: ${item.name}`);
+    return successResponse(res, item, 'Master barang berhasil diperbarui');
+  } catch (error: any) {
+    if (error?.code === 'P2002') {
+      return errorResponse(res, 'Kode barang sudah digunakan', null, 400);
+    }
+    return errorResponse(res, error.message || 'Gagal memperbarui master barang', null, 500);
   }
 };
 
@@ -90,11 +154,32 @@ export const createMovement = async (req: Request, res: Response) => {
         }
       });
 
-      return movement;
+      return { movement, item };
     });
 
-        await writeAuditLog(req, 'CREATE', 'WAREHOUSE', 'Pergerakan stok gudang dicatat: ' + type);
-    return successResponse(res, result, `Stok ${type} berhasil dicatat`);
+    const targetUsers = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        deletedAt: null,
+        OR: [
+          { division: { name: { in: ['GUDANG', 'PURCHASING'] as any } } },
+          { role: { name: { in: ['OWNER', 'CEO', 'ADMIN', 'GM'] as any } } }
+        ]
+      },
+      select: { id: true }
+    });
+
+    await createBulkNotifications(targetUsers.map((target) => ({
+      userId: target.id,
+      title: `Stok Gudang ${type}`,
+      message: `${result.item.name} ${type === 'IN' ? 'bertambah' : 'berkurang'} ${qty} ${result.item.unit}.`,
+      type: type === 'OUT' ? 'WARNING' : 'INFO',
+      link: '/warehouse',
+      metadata: { warehouseItemId, movementId: result.movement.id }
+    }))).catch(() => {});
+
+    await writeAuditLog(req, 'CREATE', 'WAREHOUSE', 'Pergerakan stok gudang dicatat: ' + type);
+    return successResponse(res, result.movement, `Stok ${type} berhasil dicatat`);
   } catch (error) {
     return errorResponse(res, error instanceof Error ? error.message : 'Gagal mencatat pergerakan stok', null, 500);
   }

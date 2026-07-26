@@ -200,14 +200,14 @@ async function checkWarehouseStock() {
     const thresholdSetting = await prisma.systemSetting.findUnique({
       where: { key: 'LOW_STOCK_THRESHOLD' }
     });
-    const thresholdPercent = thresholdSetting ? parseInt(thresholdSetting.value) : 20;
+    const thresholdPercent = thresholdSetting ? parseInt(thresholdSetting.value) : 10;
 
     // Get all warehouse items with low stock
     const items = await prisma.warehouseItem.findMany();
 
     const lowStockItems = items.filter((item) => {
       const stockPercent = item.minStock > 0 ? (item.currentStock / item.minStock) * 100 : 100;
-      return stockPercent < thresholdPercent || item.currentStock < item.minStock;
+      return stockPercent <= thresholdPercent || item.currentStock <= item.minStock;
     });
 
     if (lowStockItems.length === 0) {
@@ -422,13 +422,13 @@ async function expireWarningLetters() {
 async function remindTaskDeadlines() {
   try {
     const now = new Date();
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const sevenDaysLater = new Date();
+    sevenDaysLater.setDate(sevenDaysLater.getDate() + 7);
 
     const tasks = await prisma.task.findMany({
       where: {
         status: { notIn: ['COMPLETED', 'CANCELLED'] },
-        dueDate: { gte: now, lte: tomorrow }
+        dueDate: { gte: now, lte: sevenDaysLater }
       }
     });
 
@@ -440,7 +440,7 @@ async function remindTaskDeadlines() {
     await createBulkNotifications(tasks.map((task) => ({
       userId: task.assignedTo,
       title: 'Deadline Tugas Dekat',
-      message: `Tugas "${task.title}" mendekati deadline.`,
+      message: `Tugas "${task.title}" deadline dalam 7 hari atau kurang.`,
       type: 'TASK',
       link: '/tasks',
       metadata: { taskId: task.id, dueDate: task.dueDate?.toISOString() }
