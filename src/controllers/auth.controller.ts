@@ -7,7 +7,8 @@ import { successResponse, errorResponse } from '../utils/response';
 import { writeAuditLog } from '../utils/audit';
 import { sendLoginOtpEmail } from '../services/email.service';
 
-const OTP_REQUIRED_ROLES = ['OWNER', 'CEO'];
+// Temporarily disabled while production Gmail/SMTP OTP delivery is being repaired.
+const OTP_REQUIRED_ROLES: string[] = [];
 const OTP_TTL_MINUTES = 10;
 const MAX_OTP_ATTEMPTS = 5;
 
