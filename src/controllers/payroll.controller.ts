@@ -5,6 +5,9 @@ import { startOfMonth, endOfMonth } from 'date-fns';
 import { createNotification } from '../services/notification.service';
 
 const getUserRole = (user: any) => user.role?.name || user.role;
+const FULL_PAYROLL_ACCESS_ROLES = ['OWNER', 'CEO'];
+
+const canAccessAllPayrolls = (role: string) => FULL_PAYROLL_ACCESS_ROLES.includes(role);
 
 export const getPayrolls = async (req: Request, res: Response) => {
   try {
@@ -14,11 +17,14 @@ export const getPayrolls = async (req: Request, res: Response) => {
 
     let whereClause: any = {};
 
-    // Staff hanya bisa lihat slip gaji sendiri
-    if (role === 'STAFF') {
+    // Hanya OWNER/CEO yang boleh melihat slip semua karyawan.
+    // Role lain tetap bisa membuka modul payroll, tetapi dipaksa ke slip miliknya sendiri.
+    if (canAccessAllPayrolls(role)) {
+      if (userId) {
+        whereClause.userId = userId;
+      }
+    } else {
       whereClause.userId = user.id;
-    } else if (userId) {
-      whereClause.userId = userId;
     }
 
     if (period) {
@@ -79,8 +85,8 @@ export const getPayrollById = async (req: Request, res: Response) => {
       return errorResponse(res, 'Payroll not found', null, 404);
     }
 
-    // Staff hanya bisa lihat slip gaji sendiri
-    if (role === 'STAFF' && payroll.userId !== user.id) {
+    // Hanya OWNER/CEO yang boleh membuka slip karyawan lain.
+    if (!canAccessAllPayrolls(role) && payroll.userId !== user.id) {
       return errorResponse(res, 'Unauthorized to view this payroll', null, 403);
     }
 
@@ -95,7 +101,7 @@ export const generatePayroll = async (req: Request, res: Response) => {
     const user = (req as any).user;
     const role = getUserRole(user);
 
-    if (!['CEO', 'OWNER', 'ADMIN', 'MANAGER'].includes(role)) {
+    if (!canAccessAllPayrolls(role)) {
       return errorResponse(res, 'Unauthorized to generate payroll', null, 403);
     }
 
@@ -224,8 +230,8 @@ export const approvePayroll = async (req: Request, res: Response) => {
     const role = getUserRole(user);
     const id = String(req.params.id);
 
-    if (!['CEO', 'OWNER'].includes(role)) {
-      return errorResponse(res, 'Only CEO can approve payroll', null, 403);
+    if (!canAccessAllPayrolls(role)) {
+      return errorResponse(res, 'Only CEO or Owner can approve payroll', null, 403);
     }
 
     const payroll = await prisma.payroll.update({
@@ -249,7 +255,7 @@ export const approvePayroll = async (req: Request, res: Response) => {
     await createNotification({
       userId: payroll.user.id,
       title: 'Slip Gaji Disetujui',
-      message: 'Slip gaji Anda sudah disetujui CEO.',
+      message: 'Slip gaji Anda sudah disetujui CEO/Owner.',
       type: 'INFO',
       link: '/payroll',
       metadata: { payrollId: payroll.id }
@@ -267,7 +273,7 @@ export const markPayrollAsPaid = async (req: Request, res: Response) => {
     const role = getUserRole(user);
     const id = String(req.params.id);
 
-    if (!['CEO', 'OWNER', 'ADMIN'].includes(role)) {
+    if (!canAccessAllPayrolls(role)) {
       return errorResponse(res, 'Unauthorized to mark payroll as paid', null, 403);
     }
 
@@ -301,7 +307,7 @@ export const updatePayroll = async (req: Request, res: Response) => {
     const role = getUserRole(user);
     const id = String(req.params.id);
 
-    if (!['CEO', 'OWNER', 'ADMIN', 'MANAGER'].includes(role)) {
+    if (!canAccessAllPayrolls(role)) {
       return errorResponse(res, 'Unauthorized to update payroll', null, 403);
     }
 
@@ -349,8 +355,8 @@ export const deletePayroll = async (req: Request, res: Response) => {
     const role = getUserRole(user);
     const id = String(req.params.id);
 
-    if (!['CEO', 'OWNER'].includes(role)) {
-      return errorResponse(res, 'Only CEO can delete payroll', null, 403);
+    if (!canAccessAllPayrolls(role)) {
+      return errorResponse(res, 'Only CEO or Owner can delete payroll', null, 403);
     }
 
     const payroll = await prisma.payroll.findUnique({

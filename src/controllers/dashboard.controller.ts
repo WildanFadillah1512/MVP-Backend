@@ -509,6 +509,9 @@ export const getEmployeePerformanceLeaderboard = async (req: Request, res: Respo
 export const getEmployeeStatistics = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const actor = (req as any).user;
+    const actorRole = actor?.role?.name || actor?.role;
+    const canViewPayroll = ['OWNER', 'CEO'].includes(actorRole) || actor?.id === id;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -569,7 +572,7 @@ export const getEmployeeStatistics = async (req: Request, res: Response) => {
         grade: kpiScore >= 90 ? 'A' : kpiScore >= 75 ? 'B' : kpiScore >= 60 ? 'C' : 'D'
       },
       targets: user.targetAssignments,
-      recentPayrolls: user.payrolls,
+      recentPayrolls: canViewPayroll ? user.payrolls : [],
       recentLeaves: user.leaveRequests
     }, 'Statistik karyawan berhasil diambil');
   } catch (error: any) {
