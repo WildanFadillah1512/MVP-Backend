@@ -14,10 +14,6 @@ const generateRequestNumber = async () => {
   return `PR-${new Date().getFullYear()}-${number}`;
 };
 
-  const count = await prisma.purchaseRequest.count();
-  const number = String(count + 1).padStart(6, '0');
-  return `PR-${new Date().getFullYear()}-${number}`;
-};
 
 // Warehouse creates purchase request
 export const createPurchaseRequest = async (req: Request, res: Response) => {
