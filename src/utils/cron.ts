@@ -118,6 +118,18 @@ export const setupCronJobs = () => {
     console.log('[CRON] Running monthly backup...');
     await createMonthlyBackup();
   });
+
+  // Auto-archive completed tasks older than 7 days
+  cron.schedule('0 1 * * *', async () => {
+    console.log('[CRON] Auto-archiving old completed tasks...');
+    await archiveCompletedTasks();
+  });
+
+  // Auto-archive daily reports older than 1 month
+  cron.schedule('15 1 * * *', async () => {
+    console.log('[CRON] Auto-archiving old daily reports...');
+    await archiveOldReports();
+  });
 };
 
 
@@ -490,3 +502,47 @@ async function createMonthlyBackup() {
     console.error('[CRON] Error creating monthly backup:', error);
   }
 }
+
+async function archiveCompletedTasks() {
+  try {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const result = await prisma.task.updateMany({
+      where: {
+        status: 'COMPLETED',
+        isArchived: false,
+        updatedAt: { lt: sevenDaysAgo }
+      },
+      data: { isArchived: true }
+    });
+
+    if (result.count > 0) {
+      console.log(`[CRON] Archived ${result.count} completed tasks.`);
+    }
+  } catch (error) {
+    console.error('[CRON] Error archiving completed tasks:', error);
+  }
+}
+
+async function archiveOldReports() {
+  try {
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+
+    const result = await prisma.dailyReport.updateMany({
+      where: {
+        isArchived: false,
+        date: { lt: oneMonthAgo }
+      },
+      data: { isArchived: true }
+    });
+
+    if (result.count > 0) {
+      console.log(`[CRON] Archived ${result.count} old daily reports.`);
+    }
+  } catch (error) {
+    console.error('[CRON] Error archiving old daily reports:', error);
+  }
+}
+

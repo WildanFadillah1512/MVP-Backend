@@ -14,36 +14,47 @@ const generateRequestNumber = async () => {
   return `PR-${new Date().getFullYear()}-${number}`;
 };
 
+  const count = await prisma.purchaseRequest.count();
+  const number = String(count + 1).padStart(6, '0');
+  return `PR-${new Date().getFullYear()}-${number}`;
+};
+
 // Warehouse creates purchase request
 export const createPurchaseRequest = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
     const role = getUserRole(user);
     const division = getUserDivision(user);
-    const { warehouseItemId, requestedQty, priority, notes } = req.body;
+    const { items, priority, notes } = req.body;
 
     if (!TOP_LEVEL_ROLES.includes(role) && division !== 'GUDANG') {
       return errorResponse(res, 'Hanya divisi Gudang atau atasan yang dapat membuat purchase request', null, 403);
     }
 
-    const requestNumber = await generateRequestNumber();
-    const item = await prisma.warehouseItem.findFirst({ where: { id: warehouseItemId, isActive: true } });
-    if (!item) {
-      return errorResponse(res, 'Barang gudang wajib dipilih dari master gudang aktif', null, 400);
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return errorResponse(res, 'Minimal harus ada 1 barang dalam request', null, 400);
     }
+
+    const requestNumber = await generateRequestNumber();
 
     const purchaseRequest = await prisma.purchaseRequest.create({
       data: {
         requestNumber,
-        warehouseItemId,
-        requestedQty,
         priority: priority || 'MEDIUM',
         status: 'DRAFT',
         requestedById: user.id,
-        notes
+        notes,
+        items: {
+          create: items.map((i: any) => ({
+            warehouseItemId: i.warehouseItemId,
+            requestedQty: Number(i.requestedQty)
+          }))
+        }
       },
       include: {
-        item: true
+        items: {
+          include: { item: true }
+        }
       }
     });
 
@@ -59,10 +70,14 @@ export const createPurchaseRequest = async (req: Request, res: Response) => {
       select: { id: true }
     });
 
+    const firstItemName = purchaseRequest.items[0]?.item?.name || 'Barang';
+    const othersCount = purchaseRequest.items.length - 1;
+    const itemText = othersCount > 0 ? `${firstItemName} dan ${othersCount} lainnya` : firstItemName;
+
     await createBulkNotifications(targetUsers.map((target) => ({
       userId: target.id,
       title: 'Purchase Request Dibuat',
-      message: `${purchaseRequest.requestNumber} untuk ${item.name} sejumlah ${requestedQty} ${item.unit}.`,
+      message: `${purchaseRequest.requestNumber} untuk ${itemText}.`,
       type: 'INFO',
       link: '/purchase-requests',
       metadata: { purchaseRequestId: purchaseRequest.id }
@@ -105,7 +120,9 @@ export const submitToPurchasing = async (req: Request, res: Response) => {
         submittedAt: new Date()
       },
       include: {
-        item: true
+        items: {
+          include: { item: true }
+        }
       }
     });
 
@@ -144,16 +161,16 @@ export const setPriceAndSupplier = async (req: Request, res: Response) => {
     const role = getUserRole(user);
     const division = getUserDivision(user);
     const id = String(req.params.id);
-    const { supplierId, estimatedBudget, actualPrice } = req.body;
+    const { updatedItems } = req.body;
+    // updatedItems: [{ id: 'item_id', supplierId, estimatedBudget, actualPrice }]
 
     if (!(role === 'STAFF' && division === 'PURCHASING')) {
       return errorResponse(res, 'Only purchasing staff can set price', null, 403);
     }
 
-    // Get supplier prices for this item
     const request = await prisma.purchaseRequest.findUnique({
       where: { id },
-      include: { item: true }
+      include: { items: true }
     });
 
     if (!request) {
@@ -164,19 +181,33 @@ export const setPriceAndSupplier = async (req: Request, res: Response) => {
       return errorResponse(res, 'Harga hanya dapat diset setelah request disubmit Gudang', null, 400);
     }
 
+    if (updatedItems && Array.isArray(updatedItems)) {
+      for (const item of updatedItems) {
+        await prisma.purchaseRequestItem.update({
+          where: { id: item.id },
+          data: {
+            supplierId: item.supplierId || null,
+            estimatedBudget: item.estimatedBudget ? Number(item.estimatedBudget) : null,
+            actualPrice: item.actualPrice ? Number(item.actualPrice) : null,
+          }
+        });
+      }
+    }
+
     const purchaseRequest = await prisma.purchaseRequest.update({
       where: { id },
       data: {
-        supplierId,
-        estimatedBudget,
-        actualPrice,
         staffId: user.id,
         staffProcessedAt: new Date(),
         status: 'PENDING_MANAGER'
       },
       include: {
-        item: true,
-        supplier: true
+        items: {
+          include: {
+            item: true,
+            supplier: true
+          }
+        }
       }
     });
 
@@ -233,8 +264,12 @@ export const managerApprove = async (req: Request, res: Response) => {
         status: 'PENDING_CEO'
       },
       include: {
-        item: true,
-        supplier: true
+        items: {
+          include: {
+            item: true,
+            supplier: true
+          }
+        }
       }
     });
 
@@ -289,8 +324,12 @@ export const ceoApprove = async (req: Request, res: Response) => {
         status: 'APPROVED'
       },
       include: {
-        item: true,
-        supplier: true
+        items: {
+          include: {
+            item: true,
+            supplier: true
+          }
+        }
       }
     });
 
@@ -331,7 +370,7 @@ export const rejectPurchaseRequest = async (req: Request, res: Response) => {
         rejectReason
       },
       include: {
-        item: true
+        items: { include: { item: true } }
       }
     });
 
@@ -358,54 +397,72 @@ export const markAsPurchased = async (req: Request, res: Response) => {
     const role = getUserRole(user);
     const division = getUserDivision(user);
     const id = String(req.params.id);
-    const { actualQty, actualPrice, receiptUrl } = req.body;
+    const { purchasedItems, receiptUrl } = req.body;
+    // purchasedItems: [{ id: 'item_id', actualQty, actualPrice }]
 
     if (!TOP_LEVEL_ROLES.includes(role) && division !== 'PURCHASING') {
       return errorResponse(res, 'Hanya Purchasing atau atasan yang dapat menandai pembelian selesai', null, 403);
     }
 
-    const existing = await prisma.purchaseRequest.findUnique({ where: { id } });
+    const existing = await prisma.purchaseRequest.findUnique({ 
+      where: { id },
+      include: { items: { include: { item: true, supplier: true } } }
+    });
+    
     if (!existing) {
       return errorResponse(res, 'Purchase request not found', null, 404);
     }
     if (existing.status !== 'APPROVED') {
       return errorResponse(res, 'Request harus disetujui CEO sebelum ditandai sudah dibeli', null, 400);
     }
-    const purchasedQty = Number(actualQty || existing.requestedQty);
+
+    if (purchasedItems && Array.isArray(purchasedItems)) {
+      for (const pItem of purchasedItems) {
+        const itemRecord = existing.items.find((i: any) => i.id === pItem.id);
+        if (itemRecord) {
+          const purchasedQty = Number(pItem.actualQty || itemRecord.requestedQty);
+          
+          await prisma.purchaseRequestItem.update({
+            where: { id: pItem.id },
+            data: {
+              actualQty: purchasedQty,
+              actualPrice: Number(pItem.actualPrice || itemRecord.actualPrice || 0)
+            }
+          });
+
+          // Update warehouse stock
+          await prisma.warehouseItem.update({
+            where: { id: itemRecord.warehouseItemId },
+            data: {
+              currentStock: {
+                increment: purchasedQty
+              }
+            }
+          });
+
+          // Log warehouse movement
+          await prisma.warehouseMovement.create({
+            data: {
+              warehouseItemId: itemRecord.warehouseItemId,
+              type: 'IN',
+              quantity: purchasedQty,
+              notes: `Purchase from ${itemRecord.supplier?.name || 'supplier'} - ${existing.requestNumber}`,
+              date: new Date()
+            }
+          });
+        }
+      }
+    }
 
     const purchaseRequest = await prisma.purchaseRequest.update({
       where: { id },
       data: {
-        actualQty: purchasedQty,
-        actualPrice: Number(actualPrice || 0),
         receiptUrl,
         status: 'PURCHASED',
         purchasedAt: new Date()
       },
       include: {
-        item: true,
-        supplier: true
-      }
-    });
-
-    // Update warehouse stock
-    await prisma.warehouseItem.update({
-      where: { id: purchaseRequest.warehouseItemId },
-      data: {
-        currentStock: {
-          increment: purchasedQty
-        }
-      }
-    });
-
-    // Log warehouse movement
-    await prisma.warehouseMovement.create({
-      data: {
-        warehouseItemId: purchaseRequest.warehouseItemId,
-        type: 'IN',
-        quantity: purchasedQty,
-        notes: `Purchase from ${(purchaseRequest as any).supplier?.name || 'supplier'} - ${purchaseRequest.requestNumber}`,
-        date: new Date()
+        items: { include: { item: true, supplier: true } }
       }
     });
 
@@ -421,13 +478,17 @@ export const markAsPurchased = async (req: Request, res: Response) => {
       select: { id: true }
     });
 
+    const firstItemName = purchaseRequest.items[0]?.item?.name || 'Barang';
+    const othersCount = purchaseRequest.items.length - 1;
+    const itemText = othersCount > 0 ? `${firstItemName} dan ${othersCount} lainnya` : firstItemName;
+
     await createBulkNotifications(targetUsers.map((target) => ({
       userId: target.id,
       title: 'Barang Pembelian Masuk Gudang',
-      message: `${purchaseRequest.item.name} masuk gudang ${purchasedQty} ${purchaseRequest.item.unit} dari ${purchaseRequest.requestNumber}.`,
+      message: `${itemText} masuk gudang dari ${purchaseRequest.requestNumber}.`,
       type: 'INFO',
       link: '/warehouse',
-      metadata: { purchaseRequestId: purchaseRequest.id, warehouseItemId: purchaseRequest.warehouseItemId }
+      metadata: { purchaseRequestId: purchaseRequest.id }
     }))).catch(() => {});
 
     return successResponse(res, purchaseRequest, 'Purchase completed successfully');
@@ -482,8 +543,7 @@ export const getPurchaseRequests = async (req: Request, res: Response) => {
     const requests = await prisma.purchaseRequest.findMany({
       where: whereClause,
       include: {
-        item: true,
-        supplier: true
+        items: { include: { item: true, supplier: true } }
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -502,11 +562,15 @@ export const getPurchaseRequestById = async (req: Request, res: Response) => {
     const request = await prisma.purchaseRequest.findUnique({
       where: { id },
       include: {
-        item: true,
-        supplier: {
+        items: {
           include: {
-            supplierPrices: {
-              where: { isActive: true }
+            item: true,
+            supplier: {
+              include: {
+                supplierPrices: {
+                  where: { isActive: true }
+                }
+              }
             }
           }
         }

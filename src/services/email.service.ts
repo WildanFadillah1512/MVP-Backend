@@ -262,3 +262,40 @@ export async function sendLoginOtpEmail(to: string, otpCode: string) {
   finalError.emailAttempts = emailErrors;
   throw finalError;
 }
+
+export async function sendLoginNotificationEmail(to: string, ipAddress: string) {
+  const appName = process.env.APP_NAME || 'SikaryaERP';
+  const fromEmail = process.env.SMTP_USER || process.env.GMAIL_USER || 'me';
+  const from = process.env.SMTP_FROM || fromEmail;
+  if (!from) return;
+
+  const mailOptions = {
+    from,
+    to,
+    subject: `${appName} - Notifikasi Login CEO`,
+    text: `Halo CEO,\n\nAkun Anda telah berhasil login dari IP ${ipAddress} pada ${new Date().toLocaleString('id-ID')}.\n\nJika ini bukan Anda, segera amankan akun Anda.`,
+    html: `
+      <div style="margin:0;padding:0;background:#f6f7f8">
+        <div style="max-width:560px;margin:0 auto;padding:24px 16px;font-family:Arial,sans-serif;color:#1f2937;line-height:1.6">
+          <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;padding:24px">
+            <p style="margin:0 0 16px">Halo CEO,</p>
+            <p style="margin:0 0 16px">Akun Anda telah berhasil login dari IP <strong>${ipAddress}</strong> pada ${new Date().toLocaleString('id-ID')}.</p>
+            <p style="margin:0 0 12px">Jika ini bukan Anda, segera amankan akun Anda.</p>
+          </div>
+        </div>
+      </div>
+    `
+  };
+  
+  try {
+    const smtpConfigs = await getSmtpConfigs();
+    if (smtpConfigs && smtpConfigs.length > 0) {
+      const transporter = nodemailer.createTransport(smtpConfigs[0]);
+      await transporter.sendMail(mailOptions);
+    } else {
+      await sendWithGmailApi(to, from, mailOptions.subject, mailOptions.text, mailOptions.html);
+    }
+  } catch(e) {
+    console.error('Failed to send login notification:', e);
+  }
+}

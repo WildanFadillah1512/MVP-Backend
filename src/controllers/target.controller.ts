@@ -7,7 +7,7 @@ import { writeAuditLog } from '../utils/audit';
 export const createTarget = async (req: Request, res: Response) => {
   try {
     const assignedById = (req as any).user.id;
-    const { title, description, period, targetValue, unit, userIds } = req.body;
+    const { title, description, period, targetValue, unit, userIds, divisionId } = req.body;
     
     // Create the master target
     const target = await prisma.workTarget.create({
@@ -20,8 +20,16 @@ export const createTarget = async (req: Request, res: Response) => {
       }
     });
 
-    // Assign to users
-    if (userIds && userIds.length > 0) {
+    // Assign to division or users
+    if (divisionId) {
+      await prisma.targetAssignment.create({
+        data: {
+          targetId: target.id,
+          divisionId,
+          assignedById
+        }
+      });
+    } else if (userIds && userIds.length > 0) {
       const assignments = userIds.map((userId: string) => ({
         targetId: target.id,
         userId,
@@ -33,7 +41,7 @@ export const createTarget = async (req: Request, res: Response) => {
       });
     }
 
-        await writeAuditLog(req, 'CREATE', 'TARGET', 'Target kerja baru dibuat: ' + title);
+    await writeAuditLog(req, 'CREATE', 'TARGET', 'Target kerja baru dibuat: ' + title);
     return successResponse(res, target, 'Target berhasil dibuat dan ditugaskan');
   } catch (error) {
     console.error(error);
@@ -43,13 +51,21 @@ export const createTarget = async (req: Request, res: Response) => {
 
 export const getMyTargets = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.id;
+    const user = (req as any).user;
+    const userId = user.id;
+    const divisionId = user.divisionId;
     
     const targets = await prisma.targetAssignment.findMany({
-      where: { userId },
+      where: {
+        OR: [
+          { userId },
+          { divisionId }
+        ]
+      },
       include: {
         target: true,
-        user: { select: { name: true } }
+        user: { select: { name: true } },
+        division: { select: { name: true } }
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -62,15 +78,27 @@ export const getMyTargets = async (req: Request, res: Response) => {
 
 export const getTeamTargets = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.id;
+    const user = (req as any).user;
+    const userId = user.id;
+    const divisionId = user.divisionId;
+    const role = user.role?.name || user.role;
+    
+    let whereClause: any = {
+      OR: [
+        { user: { supervisorId: userId } }
+      ]
+    };
+    
+    if (['MANAGER', 'CEO', 'OWNER', 'LEADER'].includes(role)) {
+       whereClause.OR.push({ divisionId });
+    }
     
     const assignments = await prisma.targetAssignment.findMany({
-      where: {
-        user: { supervisorId: userId }
-      },
+      where: whereClause,
       include: {
         target: true,
-        user: { select: { name: true, division: { select: { name: true } } } }
+        user: { select: { name: true, division: { select: { name: true } } } },
+        division: { select: { name: true } }
       },
       orderBy: { createdAt: 'desc' }
     });

@@ -98,9 +98,39 @@ export const updateEventTheme = async (req: Request, res: Response) => {
       }
     });
 
-    await writeAuditLog(req, 'UPDATE', 'EVENT_THEME', `Tema event diubah: ${payload.theme}`);
+    await writeAuditLog(req, 'UPDATE', 'EVENT_THEME', `Tema event diubah menjadi ${theme}`);
     return successResponse(res, JSON.parse(setting.value), 'Tema event berhasil diperbarui');
   } catch (error: any) {
     return errorResponse(res, error.message || 'Gagal memperbarui tema event', null, 500);
+  }
+};
+
+export const getWorkdays = async (req: Request, res: Response) => {
+  try {
+    const setting = await prisma.systemSetting.findUnique({ where: { key: 'WORKDAYS_PER_MONTH' } });
+    const workdays = setting ? parseInt(setting.value) : 22;
+    return successResponse(res, { workdays }, 'Hari kerja per bulan berhasil diambil');
+  } catch (error) {
+    return errorResponse(res, 'Gagal mengambil hari kerja per bulan', null, 500);
+  }
+};
+
+export const updateWorkdays = async (req: Request, res: Response) => {
+  try {
+    const { workdays } = req.body;
+    if (!workdays || isNaN(parseInt(workdays))) {
+      return errorResponse(res, 'Nilai hari kerja tidak valid', null, 400);
+    }
+    
+    const setting = await prisma.systemSetting.upsert({
+      where: { key: 'WORKDAYS_PER_MONTH' },
+      update: { value: String(workdays) },
+      create: { key: 'WORKDAYS_PER_MONTH', value: String(workdays), description: 'Jumlah hari kerja default dalam sebulan' }
+    });
+    
+    await writeAuditLog(req, 'UPDATE', 'SETTINGS', `Hari kerja per bulan diubah menjadi ${workdays}`);
+    return successResponse(res, { workdays: parseInt(setting.value) }, 'Hari kerja per bulan berhasil diperbarui');
+  } catch (error: any) {
+    return errorResponse(res, error.message || 'Gagal memperbarui hari kerja per bulan', null, 500);
   }
 };

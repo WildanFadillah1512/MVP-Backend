@@ -109,6 +109,20 @@ export const checkIn = async (req: Request, res: Response) => {
       include: { shift: true }
     });
 
+    if (user?.shift?.startTime) {
+      const shiftHour = parseInt(user.shift.startTime.split(':')[0]);
+      const shiftMinute = parseInt(user.shift.startTime.split(':')[1]);
+      
+      const wibOffset = 7 * 60 * 60 * 1000;
+      const wibNow = new Date(now.getTime() + wibOffset);
+      const currentMinutes = wibNow.getUTCHours() * 60 + wibNow.getUTCMinutes();
+      const shiftMinutes = shiftHour * 60 + shiftMinute;
+      
+      if (shiftMinutes - currentMinutes > 15) {
+        return errorResponse(res, `Anda hanya bisa check-in maksimal 15 menit sebelum shift dimulai (${user.shift.startTime})`, null, 400);
+      }
+    }
+
     const attendance = await prisma.attendance.create({
       data: {
         userId,
@@ -274,6 +288,86 @@ export const getAllAttendanceToday = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Get all attendance today error:', error);
     return errorResponse(res, 'Terjadi kesalahan internal', null, 500);
+  }
+};
+
+export const createShiftRequest = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    const { shiftId } = req.body;
+    
+    if (!shiftId) return errorResponse(res, 'Shift ID wajib diisi', null, 400);
+
+    const shiftRequest = await prisma.shiftRequest.create({
+      data: {
+        userId,
+        shiftId
+      },
+      include: { shift: true }
+    });
+
+    await writeAuditLog(req, 'CREATE', 'SHIFT_REQUEST', 'Mengajukan perubahan shift');
+    return successResponse(res, shiftRequest, 'Permintaan pindah shift berhasil diajukan', 201);
+  } catch (error) {
+    return errorResponse(res, 'Gagal mengajukan pindah shift', null, 500);
+  }
+};
+
+export const getShiftRequests = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    const role = (req as any).user.role;
+
+    let whereClause = {};
+    if (['STAFF'].includes(role.name)) {
+      whereClause = { userId };
+    } else {
+      const managedUserWhere = await getManagedUserWhere(req);
+      if (managedUserWhere) {
+        whereClause = { user: managedUserWhere };
+      }
+    }
+
+    const requests = await prisma.shiftRequest.findMany({
+      where: whereClause,
+      include: {
+        user: { select: { id: true, name: true, division: { select: { name: true } } } },
+        shift: true
+      },
+      orderBy: { requestedAt: 'desc' }
+    });
+
+    return successResponse(res, requests, 'Daftar pengajuan shift berhasil diambil');
+  } catch (error) {
+    return errorResponse(res, 'Gagal mengambil pengajuan shift', null, 500);
+  }
+};
+
+export const approveShiftRequest = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body; // APPROVED or REJECTED
+
+    if (!['APPROVED', 'REJECTED'].includes(status)) {
+      return errorResponse(res, 'Status tidak valid', null, 400);
+    }
+
+    const request = await prisma.shiftRequest.update({
+      where: { id },
+      data: { status }
+    });
+
+    if (status === 'APPROVED') {
+      await prisma.user.update({
+        where: { id: request.userId },
+        data: { shiftId: request.shiftId }
+      });
+    }
+
+    await writeAuditLog(req, 'UPDATE', 'SHIFT_REQUEST', `Pengajuan shift ${status}`);
+    return successResponse(res, request, `Pengajuan shift ${status}`);
+  } catch (error) {
+    return errorResponse(res, 'Gagal mengubah status pengajuan shift', null, 500);
   }
 };
 

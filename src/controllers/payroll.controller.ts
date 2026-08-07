@@ -367,10 +367,6 @@ export const deletePayroll = async (req: Request, res: Response) => {
       return errorResponse(res, 'Payroll not found', null, 404);
     }
 
-    if (payroll.status === 'PAID') {
-      return errorResponse(res, 'Cannot delete paid payroll', null, 400);
-    }
-
     await prisma.payroll.delete({
       where: { id }
     });

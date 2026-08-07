@@ -67,11 +67,12 @@ model Role {
 }
 
 model Division {
-  id        String       @id @default(uuid())
-  name      String       @unique
-  users     User[]
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  id                String       @id @default(uuid())
+  name              String       @unique
+  users             User[]
+  targetAssignments TargetAssignment[]
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 }
 
 model Shift {
@@ -80,8 +81,25 @@ model Shift {
   startTime String   // e.g., "08:00"
   endTime   String   // e.g., "17:00"
   users     User[]
+  shiftRequests ShiftRequest[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model ShiftRequest {
+  id           String      @id @default(uuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id])
+  shiftId      String
+  shift        Shift       @relation(fields: [shiftId], references: [id])
+  date         DateTime    @db.Date
+  status       String      @default("PENDING") // PENDING, APPROVED, REJECTED
+  approverId   String?
+  approver     User?       @relation("ShiftApprover", fields: [approverId], references: [id])
+  reason       String?
+  notes        String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 }
 
 model User {
@@ -143,6 +161,9 @@ model User {
   warningLettersIssued WarningLetter[] @relation("WarningLetterIssuer")
   materialRequestsCreated MaterialRequest[] @relation("MaterialRequestRequester")
   materialRequestsHandled MaterialRequest[] @relation("MaterialRequestHandler")
+
+  shiftRequests   ShiftRequest[]
+  approvedShifts  ShiftRequest[] @relation("ShiftApprover")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -251,6 +272,7 @@ model DailyReport {
   obstacles   String?
   notes       String?
   status      ReportStatus @default(DRAFT)
+  isArchived  Boolean      @default(false)
 
   uploads DailyUpload[]
   tasks   DailyReportTask[]
@@ -320,11 +342,13 @@ model WorkTarget {
 model TargetAssignment {
   id           String @id @default(uuid())
   targetId     String
-  userId       String
+  userId       String?
+  divisionId   String?
   assignedById String
 
-  target WorkTarget @relation(fields: [targetId], references: [id])
-  user   User       @relation(fields: [userId], references: [id])
+  target   WorkTarget @relation(fields: [targetId], references: [id])
+  user     User?      @relation(fields: [userId], references: [id])
+  division Division?  @relation(fields: [divisionId], references: [id])
 
   currentValue Float   @default(0)
   isCompleted  Boolean @default(false)
@@ -434,7 +458,7 @@ model Supplier {
   approvedAt   DateTime?
 
   supplierPrices SupplierPrice[]
-  purchaseRequests PurchaseRequest[]
+  purchaseRequestItems PurchaseRequestItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -450,7 +474,7 @@ model MaterialRequest {
   handledBy       User?         @relation("MaterialRequestHandler", fields: [handledById], references: [id])
   warehouseItemId String
   item            WarehouseItem @relation(fields: [warehouseItemId], references: [id])
-  quantity        Int
+  quantity        Float
   purpose         String
   status          String        @default("PENDING")
   notes           String?
@@ -483,17 +507,31 @@ model SupplierPrice {
   @@index([warehouseItemId])
 }
 
+model PurchaseRequestItem {
+  id                String         @id @default(uuid())
+  purchaseRequestId String
+  purchaseRequest   PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  
+  warehouseItemId   String
+  item              WarehouseItem  @relation(fields: [warehouseItemId], references: [id])
+  
+  requestedQty      Float
+  estimatedBudget   Float?
+  actualPrice       Float?
+  actualQty         Float?
+  
+  supplierId        String?
+  supplier          Supplier?      @relation(fields: [supplierId], references: [id])
+
+  @@index([purchaseRequestId])
+  @@index([warehouseItemId])
+}
+
 model PurchaseRequest {
   id                String         @id @default(uuid())
   requestNumber     String         @unique
-  warehouseItemId   String
-  item              WarehouseItem  @relation(fields: [warehouseItemId], references: [id])
-  requestedQty      Int
-  estimatedBudget   Float?
-  actualPrice       Float?
-  actualQty         Int?
-  supplierId        String?
-  supplier          Supplier?      @relation(fields: [supplierId], references: [id])
+  
+  items             PurchaseRequestItem[]
   
   status            PurchaseStatus @default(DRAFT)
   priority          String         @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
@@ -520,7 +558,6 @@ model PurchaseRequest {
 
   @@index([status])
   @@index([requestedById])
-  @@index([warehouseItemId])
 }
 
 model ShoppingNeed {
@@ -654,8 +691,9 @@ model WarehouseItem {
   code         String @unique
   name         String
   category     String
-  minStock     Int    @default(10)
-  currentStock Int    @default(0)
+  minStock     Float  @default(10)
+  maxStock     Float?
+  currentStock Float  @default(0)
   unit         String
   purchasePrice Float @default(0)
   purchaseGram  Float @default(0)
@@ -665,7 +703,7 @@ model WarehouseItem {
   movements WarehouseMovement[]
   recipes   ErpProductRecipe[]
   supplierPrices SupplierPrice[]
-  purchaseRequests PurchaseRequest[]
+  purchaseRequestItems PurchaseRequestItem[]
   materialRequests MaterialRequest[]
 
   createdAt DateTime @default(now())
@@ -677,7 +715,7 @@ model WarehouseMovement {
   warehouseItemId String
   item            WarehouseItem     @relation(fields: [warehouseItemId], references: [id])
   type            StockMovementType
-  quantity        Int
+  quantity        Float
   notes           String?
   date            DateTime          @default(now())
 
@@ -958,6 +996,7 @@ model Task {
   dueDate     DateTime?
   completedAt DateTime?
   attachments String? // JSON array of file URLs
+  isArchived  Boolean      @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

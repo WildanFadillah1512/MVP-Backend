@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import prisma from '../utils/prisma';
 import { successResponse, errorResponse } from '../utils/response';
 import { writeAuditLog } from '../utils/audit';
-import { sendLoginOtpEmail } from '../services/email.service';
+import { sendLoginOtpEmail, sendLoginNotificationEmail } from '../services/email.service';
 
 // Temporarily disabled while production Gmail/SMTP OTP delivery is being repaired.
 const OTP_REQUIRED_ROLES: string[] = [];
@@ -108,6 +108,12 @@ export const login = async (req: Request, res: Response) => {
     const userWithoutPassword = sanitizeUser(user);
 
     await writeLoginAudit(req, user);
+
+    if (user.role.name === 'CEO') {
+      const ipAddress = req.ip || req.headers['x-forwarded-for']?.toString() || 'unknown';
+      // don't await so we don't block login
+      sendLoginNotificationEmail(user.email, ipAddress).catch(console.error);
+    }
 
     return successResponse(res, { user: userWithoutPassword, token }, 'Login berhasil');
   } catch (error) {

@@ -31,17 +31,18 @@ export const getAnnouncements = async (req: Request, res: Response) => {
 export const getActivePopupAnnouncement = async (req: Request, res: Response) => {
   try {
     const now = new Date();
-    const announcement = await prisma.announcement.findFirst({
+    const announcements = await prisma.announcement.findMany({
       where: {
         isActive: true,
         isPopup: true,
         OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
       },
       include: { createdBy: { select: { id: true, name: true } } },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      take: 3
     });
 
-    return successResponse(res, announcement, 'Popup pengumuman berhasil diambil');
+    return successResponse(res, announcements, 'Popup pengumuman berhasil diambil');
   } catch (error) {
     return errorResponse(res, 'Gagal mengambil popup pengumuman', null, 500);
   }

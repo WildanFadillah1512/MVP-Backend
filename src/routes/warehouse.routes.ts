@@ -7,9 +7,9 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/items', getItems);
-router.post('/items', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER']), createItem);
-router.put('/items/:id', updateItem);
-router.delete('/items/:id', deleteItem);
+router.post('/items', authorizeRole(['OWNER', 'CEO']), createItem);
+router.put('/items/:id', authorizeRole(['OWNER', 'CEO']), updateItem);
+router.delete('/items/:id', authorizeRole(['OWNER', 'CEO']), deleteItem);
 router.get('/movements', getMovements);
 router.get('/recommendations', getLowStockRecommendations);
 router.post('/movements', authorizeDivision(['GUDANG']), createMovement);
