@@ -294,14 +294,16 @@ export const getAllAttendanceToday = async (req: Request, res: Response) => {
 export const createShiftRequest = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
-    const { shiftId } = req.body;
+    const { shiftId, date } = req.body;
     
     if (!shiftId) return errorResponse(res, 'Shift ID wajib diisi', null, 400);
+    if (!date) return errorResponse(res, 'Tanggal pengajuan wajib diisi', null, 400);
 
     const shiftRequest = await prisma.shiftRequest.create({
       data: {
         userId,
-        shiftId
+        shiftId,
+        date: new Date(date)
       },
       include: { shift: true }
     });
@@ -309,6 +311,7 @@ export const createShiftRequest = async (req: Request, res: Response) => {
     await writeAuditLog(req, 'CREATE', 'SHIFT_REQUEST', 'Mengajukan perubahan shift');
     return successResponse(res, shiftRequest, 'Permintaan pindah shift berhasil diajukan', 201);
   } catch (error) {
+    console.error('Create shift request error:', error);
     return errorResponse(res, 'Gagal mengajukan pindah shift', null, 500);
   }
 };
