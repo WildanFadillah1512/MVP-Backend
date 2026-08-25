@@ -288,6 +288,47 @@ export const deactivateUser = async (req: Request, res: Response) => {
     return errorResponse(res, 'Gagal menonaktifkan user', null, 500);
   }
 };
+export const terminateUser = async (req: Request, res: Response) => {
+  try {
+    const { reason, notes } = req.body;
+    if (!reason) {
+      return errorResponse(res, 'Alasan pemecatan wajib diisi', null, 400);
+    }
+
+    const target = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      include: { role: true, division: true }
+    });
+    if (!target || target.deletedAt) return errorResponse(res, 'User tidak ditemukan atau sudah dihapus', null, 404);
+
+    const policyError = await assertCanManagePayload(req, target.roleId, target.divisionId, target.id);
+    if (policyError) return errorResponse(res, policyError, null, 403);
+
+    const actor = await getActor(req);
+    if (!actor) return errorResponse(res, 'Akses ditolak', null, 401);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.terminationRecord.create({
+        data: {
+          userId: target.id,
+          terminatedById: actor.id,
+          reason,
+          notes: notes || null
+        }
+      });
+      await tx.user.update({
+        where: { id: target.id },
+        data: { isActive: false, deletedAt: new Date() }
+      });
+    });
+
+    await writeAuditLog(req, 'UPDATE', 'USER', `User dipecat: ${target.id} dengan alasan: ${reason}`);
+    return successResponse(res, { id: target.id }, 'User berhasil dipecat');
+  } catch (error) {
+    console.error('Terminate Error:', error);
+    return errorResponse(res, 'Gagal memproses pemecatan', null, 500);
+  }
+};
 
 export const getUserOptions = async (req: Request, res: Response) => {
   try {
@@ -636,7 +677,20 @@ export const getWarningLetters = async (req: Request, res: Response) => {
       where: { expiresAt: { lt: new Date() } }
     });
 
+    const { startDate, endDate } = req.query;
+    const filter: any = {};
+
+    if (startDate && endDate) {
+      const end = new Date(endDate as string);
+      end.setHours(23, 59, 59, 999);
+      filter.createdAt = {
+        gte: new Date(startDate as string),
+        lte: end
+      };
+    }
+
     const warnings = await prisma.warningLetter.findMany({
+      where: filter,
       include: {
         employee: { include: { role: true, division: true, branch: true } },
         issuedBy: { select: { id: true, name: true } }

@@ -7,7 +7,8 @@ import {
   getCriticalStock,
   getBranchPerformance,
   getEmployeePerformanceLeaderboard,
-  getEmployeeStatistics
+  getEmployeeStatistics,
+  getMonthlyLeaderboard
 } from '../controllers/dashboard.controller';
 import { authenticate, authorizeRole } from '../middlewares/auth.middleware';
 
@@ -29,5 +30,8 @@ router.get('/critical-stock', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MAN
 router.get('/branch-performance', authorizeRole(['OWNER', 'CEO', 'ADMIN', 'MANAGER']), getBranchPerformance);
 router.get('/employee-leaderboard', authorizeRole(['OWNER', 'CEO', 'ADMIN']), getEmployeePerformanceLeaderboard);
 router.get('/employees/:id/statistics', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER', 'LEADER']), getEmployeeStatistics);
+
+// Monthly separated metrics leaderboard (Accessible by all, filter done in controller)
+router.get('/leaderboard', getMonthlyLeaderboard);
 
 export default router;

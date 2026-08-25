@@ -12,6 +12,6 @@ router.put('/items/:id', authorizeRole(['OWNER', 'CEO']), updateItem);
 router.delete('/items/:id', authorizeRole(['OWNER', 'CEO']), deleteItem);
 router.get('/movements', getMovements);
 router.get('/recommendations', getLowStockRecommendations);
-router.post('/movements', authorizeDivision(['GUDANG']), createMovement);
+router.post('/movements', authorizeDivision(['GUDANG', 'PURCHASING']), createMovement);
 
 export default router;

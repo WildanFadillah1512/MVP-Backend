@@ -518,17 +518,17 @@ export const getEmployeeStatistics = async (req: Request, res: Response) => {
     const workingDays = Math.max(1, Math.ceil((today.getTime() - thisMonth.getTime()) / (1000 * 60 * 60 * 24)));
 
     const user = await prisma.user.findFirst({
-      where: { id, deletedAt: null },
+      where: { id: id as string, deletedAt: null },
       select: {
         id: true,
         name: true,
         email: true,
         role: { select: { name: true } },
         division: { select: { name: true } },
-        attendances: { where: { date: { gte: thisMonth }, status: { in: [AttendanceStatus.HADIR, AttendanceStatus.TELAT] } } },
-        dailyReports: { where: { date: { gte: thisMonth }, status: { in: [ReportStatus.SUBMITTED, ReportStatus.LOCKED] } } },
-        dailyUploads: { where: { createdAt: { gte: thisMonth } } },
-        overtimeRecords: { where: { date: { gte: thisMonth }, status: 'APPROVED' } },
+        attendances: { select: { id: true }, where: { date: { gte: thisMonth }, status: { in: [AttendanceStatus.HADIR, AttendanceStatus.TELAT] } } },
+        dailyReports: { select: { id: true }, where: { date: { gte: thisMonth }, status: { in: [ReportStatus.SUBMITTED, ReportStatus.LOCKED] } } },
+        dailyUploads: { select: { id: true }, where: { createdAt: { gte: thisMonth } } },
+        overtimeRecords: { select: { totalHours: true }, where: { date: { gte: thisMonth }, status: 'APPROVED' } },
         targetAssignments: { include: { target: true } },
         payrolls: { orderBy: { period: 'desc' }, take: 3 },
         leaveRequests: { orderBy: { createdAt: 'desc' }, take: 5 }
@@ -545,6 +545,18 @@ export const getEmployeeStatistics = async (req: Request, res: Response) => {
     const uploadScore = Math.min(100, Math.round((user.dailyUploads.length / workingDays) * 100));
     const overtimeHours = user.overtimeRecords.reduce((sum, item) => sum + item.totalHours, 0);
     const kpiScore = Math.round((attendanceScore * 0.3) + (reportScore * 0.3) + (targetScore * 0.4));
+
+    // CEO Task Stats for Monthly Report
+    const ceoTasksThisMonth = await prisma.task.findMany({
+      where: {
+        assignedTo: id as string,
+        assigner: { role: { name: { in: ['CEO', 'OWNER'] } } },
+        createdAt: { gte: thisMonth }
+      }
+    });
+    const ceoTasksTotal = ceoTasksThisMonth.length;
+    const ceoTasksCompleted = ceoTasksThisMonth.filter(t => t.status === 'COMPLETED').length;
+    const ceoTasksPending = ceoTasksTotal - ceoTasksCompleted;
 
     return successResponse(res, {
       employee: {
@@ -563,6 +575,11 @@ export const getEmployeeStatistics = async (req: Request, res: Response) => {
         activeTargets: user.targetAssignments.filter((item) => !item.isCompleted).length,
         completedTargets: user.targetAssignments.filter((item) => item.isCompleted).length
       },
+      ceoTasks: {
+        total: ceoTasksTotal,
+        completed: ceoTasksCompleted,
+        pending: ceoTasksPending
+      },
       scores: {
         attendanceScore,
         reportScore,
@@ -577,6 +594,93 @@ export const getEmployeeStatistics = async (req: Request, res: Response) => {
     }, 'Statistik karyawan berhasil diambil');
   } catch (error: any) {
     console.error('Error getting employee statistics:', error);
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+// GET Monthly Leaderboard (Separated Metrics)
+export const getMonthlyLeaderboard = async (req: Request, res: Response) => {
+  try {
+    const actor = (req as any).user;
+    const actorRole = actor?.role?.name || actor?.role;
+    const actorDivisionId = actor.divisionId;
+    const actorId = actor.id;
+
+    const { month } = req.query;
+    let targetDate = new Date();
+    if (month && typeof month === 'string') {
+      targetDate = new Date(month);
+    }
+    const thisMonth = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1);
+    const nextMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 1);
+    
+    const today = new Date();
+    let endDate = nextMonth;
+    if (thisMonth.getFullYear() === today.getFullYear() && thisMonth.getMonth() === today.getMonth()) {
+      endDate = today;
+    }
+    const workingDays = Math.max(1, Math.ceil((endDate.getTime() - thisMonth.getTime()) / (1000 * 60 * 60 * 24)));
+
+    let whereClause: any = { isActive: true, deletedAt: null };
+    if (['MANAGER'].includes(actorRole)) {
+      whereClause.divisionId = actorDivisionId;
+    } else if (['LEADER'].includes(actorRole)) {
+      whereClause.supervisorId = actorId;
+    } else if (['STAFF'].includes(actorRole)) {
+      whereClause.divisionId = actorDivisionId;
+    }
+
+    const users = await prisma.user.findMany({
+      where: whereClause,
+      select: {
+        id: true, name: true, photoUrl: true,
+        role: { select: { name: true } },
+        division: { select: { name: true } },
+        attendances: { where: { date: { gte: thisMonth, lt: nextMonth }, status: { in: [AttendanceStatus.HADIR, AttendanceStatus.TELAT] } } },
+        dailyReports: { where: { date: { gte: thisMonth, lt: nextMonth }, status: { in: [ReportStatus.SUBMITTED, ReportStatus.LOCKED] } } },
+        targetAssignments: { include: { target: true } }
+      }
+    });
+
+    const leaderboard = users.map(u => {
+      const attendanceDays = u.attendances.length;
+      const reportDays = u.dailyReports.length;
+      
+      const attendanceScore = Math.min(100, Math.round((attendanceDays / workingDays) * 100));
+      const reportScore = Math.min(100, Math.round((reportDays / workingDays) * 100));
+      
+      let targetScore = 0;
+      if (u.targetAssignments.length > 0) {
+        const total = u.targetAssignments.reduce((s, ta) => s + Math.min(100, (ta.currentValue / Math.max(1, ta.target.targetValue)) * 100), 0);
+        targetScore = Math.round(total / u.targetAssignments.length);
+      }
+
+      const kpiScore = Math.round((attendanceScore * 0.3) + (reportScore * 0.3) + (targetScore * 0.4));
+
+      return {
+        id: u.id,
+        name: u.name,
+        photoUrl: u.photoUrl,
+        role: u.role.name,
+        division: u.division.name,
+        scores: {
+          attendance: attendanceScore,
+          report: reportScore,
+          target: targetScore,
+          kpi: kpiScore
+        },
+        raw: {
+          attendanceDays,
+          reportDays,
+          workingDays,
+          targetCount: u.targetAssignments.length
+        }
+      };
+    });
+
+    return successResponse(res, leaderboard, 'Data leaderboard bulanan berhasil diambil');
+  } catch (error: any) {
+    console.error('Error getting monthly leaderboard:', error);
     return errorResponse(res, error.message, 500);
   }
 };

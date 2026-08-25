@@ -60,15 +60,20 @@ const getTodayWIB = (): Date => {
   return today;
 };
 
-// Cek apakah jam melewati startTime dari Shift
-const isLate = (shiftStartTime?: string): boolean => {
+// Cek apakah jam melewati startTime dari Shift atau Holiday
+const isLate = (shiftStartTime?: string | null, holidayWorkStartTime?: string | null): boolean => {
   const now = new Date();
   const wibOffset = 7 * 60 * 60 * 1000;
   const wibNow = new Date(now.getTime() + wibOffset);
   
-  // Default to 09:00 if no shift
-  const limitHour = shiftStartTime ? parseInt(shiftStartTime.split(':')[0]) : 9;
-  const limitMinute = shiftStartTime ? parseInt(shiftStartTime.split(':')[1]) : 0;
+  // Override urutan: Holiday -> Shift -> Default (09:00)
+  let targetTime = shiftStartTime;
+  if (holidayWorkStartTime) {
+    targetTime = holidayWorkStartTime;
+  }
+  
+  const limitHour = targetTime ? parseInt(targetTime.split(':')[0]) : 9;
+  const limitMinute = targetTime ? parseInt(targetTime.split(':')[1]) : 0;
   
   if (wibNow.getUTCHours() > limitHour) return true;
   if (wibNow.getUTCHours() === limitHour && wibNow.getUTCMinutes() > limitMinute) return true;
@@ -109,9 +114,19 @@ export const checkIn = async (req: Request, res: Response) => {
       include: { shift: true }
     });
 
-    if (user?.shift?.startTime) {
-      const shiftHour = parseInt(user.shift.startTime.split(':')[0]);
-      const shiftMinute = parseInt(user.shift.startTime.split(':')[1]);
+    // Get Holiday today
+    const holiday = await prisma.holiday.findUnique({
+      where: { date: today }
+    });
+
+    let targetStartTime = user?.shift?.startTime;
+    if (holiday?.workStartTime) {
+      targetStartTime = holiday.workStartTime;
+    }
+
+    if (targetStartTime) {
+      const shiftHour = parseInt(targetStartTime.split(':')[0]);
+      const shiftMinute = parseInt(targetStartTime.split(':')[1]);
       
       const wibOffset = 7 * 60 * 60 * 1000;
       const wibNow = new Date(now.getTime() + wibOffset);
@@ -119,7 +134,7 @@ export const checkIn = async (req: Request, res: Response) => {
       const shiftMinutes = shiftHour * 60 + shiftMinute;
       
       if (shiftMinutes - currentMinutes > 15) {
-        return errorResponse(res, `Anda hanya bisa check-in maksimal 15 menit sebelum shift dimulai (${user.shift.startTime})`, null, 400);
+        return errorResponse(res, `Anda hanya bisa check-in maksimal 15 menit sebelum jam kerja dimulai (${targetStartTime})`, null, 400);
       }
     }
 
@@ -128,7 +143,7 @@ export const checkIn = async (req: Request, res: Response) => {
         userId,
         date: today,
         checkIn: now,
-        status: isLate(user?.shift?.startTime) ? AttendanceStatus.TELAT : AttendanceStatus.HADIR,
+        status: isLate(user?.shift?.startTime, holiday?.workStartTime) ? AttendanceStatus.TELAT : AttendanceStatus.HADIR,
       },
       include: {
         user: {
@@ -237,11 +252,22 @@ export const checkOut = async (req: Request, res: Response) => {
 export const getMyAttendance = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
+    const { startDate, endDate } = req.query;
+    
+    let dateFilter = {};
+    if (startDate && endDate) {
+      dateFilter = {
+        date: {
+          gte: new Date(startDate as string),
+          lte: new Date(endDate as string)
+        }
+      };
+    }
     
     const attendances = await prisma.attendance.findMany({
-      where: { userId },
+      where: { userId, ...dateFilter },
       orderBy: { date: 'desc' },
-      take: 30,
+      take: (startDate && endDate) ? undefined : 30,
       include: {
         user: {
           select: {
@@ -337,7 +363,7 @@ export const getShiftRequests = async (req: Request, res: Response) => {
         user: { select: { id: true, name: true, division: { select: { name: true } } } },
         shift: true
       },
-      orderBy: { requestedAt: 'desc' }
+      orderBy: { createdAt: 'desc' }
     });
 
     return successResponse(res, requests, 'Daftar pengajuan shift berhasil diambil');
@@ -356,8 +382,8 @@ export const approveShiftRequest = async (req: Request, res: Response) => {
     }
 
     const request = await prisma.shiftRequest.update({
-      where: { id },
-      data: { status }
+      where: { id: id as string },
+      data: { status: status as string }
     });
 
     if (status === 'APPROVED') {
@@ -411,5 +437,69 @@ export const getLocationLogs = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Get location logs error:', error);
     return errorResponse(res, 'Terjadi kesalahan mengambil data lokasi', null, 500);
+  }
+};
+
+export const startBreak = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    const today = getTodayWIB();
+
+    const attendance = await prisma.attendance.findUnique({
+      where: { userId_date: { userId, date: today } },
+    });
+
+    if (!attendance) {
+      return errorResponse(res, 'Anda belum melakukan check-in hari ini', null, 400);
+    }
+    if (attendance.checkOut) {
+      return errorResponse(res, 'Anda sudah melakukan check-out hari ini', null, 400);
+    }
+    if (attendance.breakStart) {
+      return errorResponse(res, 'Anda sudah mulai istirahat', null, 400);
+    }
+
+    const updatedAttendance = await prisma.attendance.update({
+      where: { id: attendance.id },
+      data: { breakStart: new Date() },
+    });
+
+    await writeAuditLog(req, 'START_BREAK', 'ATTENDANCE', 'Karyawan memulai istirahat');
+    return successResponse(res, updatedAttendance, 'Waktu istirahat dimulai');
+  } catch (error) {
+    console.error('Start break error:', error);
+    return errorResponse(res, 'Terjadi kesalahan saat memulai istirahat', null, 500);
+  }
+};
+
+export const endBreak = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    const today = getTodayWIB();
+
+    const attendance = await prisma.attendance.findUnique({
+      where: { userId_date: { userId, date: today } },
+    });
+
+    if (!attendance) {
+      return errorResponse(res, 'Anda belum melakukan check-in hari ini', null, 400);
+    }
+    if (!attendance.breakStart) {
+      return errorResponse(res, 'Anda belum memulai waktu istirahat', null, 400);
+    }
+    if (attendance.breakEnd) {
+      return errorResponse(res, 'Anda sudah menyelesaikan istirahat', null, 400);
+    }
+
+    const updatedAttendance = await prisma.attendance.update({
+      where: { id: attendance.id },
+      data: { breakEnd: new Date() },
+    });
+
+    await writeAuditLog(req, 'END_BREAK', 'ATTENDANCE', 'Karyawan selesai istirahat');
+    return successResponse(res, updatedAttendance, 'Waktu istirahat selesai');
+  } catch (error) {
+    console.error('End break error:', error);
+    return errorResponse(res, 'Terjadi kesalahan saat mengakhiri istirahat', null, 500);
   }
 };

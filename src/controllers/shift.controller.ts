@@ -49,7 +49,7 @@ export const updateShift = async (req: Request, res: Response) => {
       return errorResponse(res, 'Shift hanya boleh Pagi, Middle, atau Malam', null, 400);
     }
     const shift = await prisma.shift.update({
-      where: { id },
+      where: { id: id as string },
       data: { name, startTime, endTime }
     });
     return successResponse(res, shift, 'Shift berhasil diupdate');
@@ -61,7 +61,7 @@ export const updateShift = async (req: Request, res: Response) => {
 export const deleteShift = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    await prisma.shift.delete({ where: { id } });
+    await prisma.shift.delete({ where: { id: id as string } });
     return successResponse(res, null, 'Shift berhasil dihapus');
   } catch (error) {
     return errorResponse(res, 'Terjadi kesalahan saat menghapus shift', null, 500);

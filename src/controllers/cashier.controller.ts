@@ -112,7 +112,19 @@ export const createBranch = async (req: Request, res: Response) => {
 
 export const getCashierReports = async (req: Request, res: Response) => {
   try {
+    const { startDate, endDate } = req.query;
+    let dateFilter = {};
+    if (startDate && endDate) {
+      dateFilter = {
+        date: {
+          gte: new Date(startDate as string),
+          lte: new Date(endDate as string)
+        }
+      };
+    }
+
     const reports = await prisma.cashierReport.findMany({
+      where: { ...dateFilter },
       include: {
         branch: true,
         createdBy: { select: { id: true, name: true, email: true } }

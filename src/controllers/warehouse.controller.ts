@@ -187,7 +187,20 @@ export const createMovement = async (req: Request, res: Response) => {
 
 export const getMovements = async (req: Request, res: Response) => {
   try {
+    const { startDate, endDate } = req.query;
+    let dateFilter = {};
+    
+    if (startDate && endDate) {
+      dateFilter = {
+        date: {
+          gte: new Date(startDate as string),
+          lte: new Date(endDate as string)
+        }
+      };
+    }
+
     const movements = await prisma.warehouseMovement.findMany({
+      where: { ...dateFilter },
       include: { item: true },
       orderBy: { date: 'desc' }
     });

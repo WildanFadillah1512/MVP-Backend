@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { checkIn, checkOut, getMyAttendance, getLocationLogs, getAllAttendanceToday, createShiftRequest, getShiftRequests, approveShiftRequest } from '../controllers/attendance.controller';
+import { checkIn, checkOut, getMyAttendance, getLocationLogs, getAllAttendanceToday, createShiftRequest, getShiftRequests, approveShiftRequest, startBreak, endBreak } from '../controllers/attendance.controller';
 import { authenticate, authorizeRole } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -9,6 +9,8 @@ router.use(authenticate);
 // Semua user bisa check-in, check-out, dan lihat absensi diri sendiri
 router.post('/check-in', checkIn);
 router.post('/check-out', checkOut);
+router.post('/break/start', startBreak);
+router.post('/break/end', endBreak);
 router.get('/me', getMyAttendance);
 
 // Rekap absensi tim hari ini - atasan melihat sesuai struktur/hak akses

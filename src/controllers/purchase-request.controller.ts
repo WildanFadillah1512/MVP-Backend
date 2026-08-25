@@ -530,9 +530,11 @@ export const getPurchaseRequests = async (req: Request, res: Response) => {
     }
 
     if (startDate && endDate) {
+      const end = new Date(endDate as string);
+      end.setHours(23, 59, 59, 999);
       whereClause.createdAt = {
         gte: new Date(startDate as string),
-        lte: new Date(endDate as string)
+        lte: end
       };
     }
 

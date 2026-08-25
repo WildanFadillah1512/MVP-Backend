@@ -95,7 +95,7 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
   try {
     const { title, message, fileUrl, fileName, isPopup, isActive, expiresAt } = req.body;
     const announcement = await prisma.announcement.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id as string },
       data: {
         ...(title !== undefined ? { title: String(title).trim() } : {}),
         ...(message !== undefined ? { message: String(message).trim() } : {}),

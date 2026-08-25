@@ -28,6 +28,7 @@ import materialRequestRoutes from './material-request.routes';
 import shiftRoutes from './shift.routes';
 import announcementRoutes from './announcement.routes';
 import settingsRoutes from './settings.routes';
+import holidayRoutes from './holiday.routes';
 
 const router = Router();
 
@@ -60,5 +61,6 @@ router.use('/material-requests', materialRequestRoutes);
 router.use('/shifts', shiftRoutes);
 router.use('/announcements', announcementRoutes);
 router.use('/settings', settingsRoutes);
+router.use('/holidays', holidayRoutes);
 
 export default router;

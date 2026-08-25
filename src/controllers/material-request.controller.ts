@@ -47,7 +47,17 @@ export const getMaterialRequests = async (req: Request, res: Response) => {
     const user = (req as any).user;
     const role = getRole(user);
     const division = getDivision(user);
+    const { startDate, endDate } = req.query;
     const where: any = {};
+
+    if (startDate && endDate) {
+      const end = new Date(endDate as string);
+      end.setHours(23, 59, 59, 999);
+      where.createdAt = {
+        gte: new Date(startDate as string),
+        lte: end
+      };
+    }
 
     if (!['OWNER', 'CEO', 'ADMIN', 'GM'].includes(role) && division === 'PRODUKSI') {
       where.requestedById = user.id;
@@ -154,8 +164,8 @@ export const fulfillMaterialRequest = async (req: Request, res: Response) => {
     const division = getDivision(user);
     const id = String(req.params.id);
 
-    if (division !== 'GUDANG' && !['OWNER', 'CEO', 'ADMIN'].includes(role)) {
-      return errorResponse(res, 'Hanya Gudang atau CEO/Admin yang dapat memproses request bahan', null, 403);
+    if (!['GUDANG', 'PURCHASING'].includes(division) && !['OWNER', 'CEO', 'ADMIN'].includes(role)) {
+      return errorResponse(res, 'Hanya Gudang, Purchasing, atau CEO/Admin yang dapat memproses request bahan', null, 403);
     }
 
     const request = await prisma.$transaction(async (tx) => {
@@ -217,8 +227,8 @@ export const rejectMaterialRequest = async (req: Request, res: Response) => {
     const division = getDivision(user);
     const id = String(req.params.id);
 
-    if (division !== 'GUDANG' && !['OWNER', 'CEO', 'ADMIN'].includes(role)) {
-      return errorResponse(res, 'Hanya Gudang atau CEO/Admin yang dapat menolak request bahan', null, 403);
+    if (!['GUDANG', 'PURCHASING'].includes(division) && !['OWNER', 'CEO', 'ADMIN'].includes(role)) {
+      return errorResponse(res, 'Hanya Gudang, Purchasing, atau CEO/Admin yang dapat menolak request bahan', null, 403);
     }
 
     const request = await prisma.materialRequest.update({

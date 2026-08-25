@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createReport, getMyReports, getLockedReports, unlockReport } from '../controllers/report.controller';
+import { createReport, getMyReports, getLockedReports, unlockReport, getDailyReportTemplate } from '../controllers/report.controller';
 import { authenticate, authorizeRole } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -7,6 +7,7 @@ const router = Router();
 router.use(authenticate);
 router.post('/', createReport);
 router.get('/me', getMyReports);
+router.get('/daily-template', getDailyReportTemplate);
 router.get('/locked', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER', 'LEADER']), getLockedReports);
 router.patch('/:id/unlock', authorizeRole(['OWNER', 'CEO', 'GM', 'ADMIN', 'MANAGER', 'LEADER']), unlockReport);
 

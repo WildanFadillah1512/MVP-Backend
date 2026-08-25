@@ -54,7 +54,7 @@ export const streamDriveFile = async (req: Request, res: Response) => {
       return errorResponse(res, 'File ID tidak valid', null, 400);
     }
 
-    const { metadata, stream } = await getDriveFileStream(fileId);
+    const { metadata, stream } = await getDriveFileStream(fileId as string);
 
     if (metadata.mimeType) {
       res.setHeader('Content-Type', metadata.mimeType);

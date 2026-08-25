@@ -218,7 +218,22 @@ export const createProductionRecordsBulk = async (req: Request, res: Response) =
 
 export const getProductionRecords = async (req: Request, res: Response) => {
   try {
+    const { startDate, endDate } = req.query;
+    
+    let dateFilter = {};
+    if (startDate && endDate) {
+      dateFilter = {
+        date: {
+          gte: new Date(startDate as string),
+          lte: new Date(endDate as string)
+        }
+      };
+    }
+
     const records = await prisma.productionRecord.findMany({
+      where: {
+        ...dateFilter
+      },
       include: { product: true, rejects: true },
       orderBy: { date: 'desc' }
     });

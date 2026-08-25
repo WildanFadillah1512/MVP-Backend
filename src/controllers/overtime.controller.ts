@@ -59,8 +59,20 @@ export const createOvertimeRequest = async (req: Request, res: Response) => {
 export const getMyOvertimeRecords = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
+    const { startDate, endDate } = req.query;
+
+    let dateFilter = {};
+    if (startDate && endDate) {
+      dateFilter = {
+        date: {
+          gte: new Date(startDate as string),
+          lte: new Date(endDate as string)
+        }
+      };
+    }
+
     const records = await prisma.overtimeRecord.findMany({
-      where: { userId },
+      where: { userId, ...dateFilter },
       orderBy: { date: 'desc' }
     });
     return successResponse(res, records, 'Data lembur berhasil diambil');
@@ -114,7 +126,16 @@ export const updateOvertimeStatus = async (req: Request, res: Response) => {
 export const getAllOvertimeRecords = async (req: Request, res: Response) => {
   try {
     const actor = (req as any).user;
+    const { startDate, endDate } = req.query;
     const where: any = {};
+    
+    if (startDate && endDate) {
+      where.date = {
+        gte: new Date(startDate as string),
+        lte: new Date(endDate as string)
+      };
+    }
+
     if (actor.role === 'GM') {
       where.user = { division: { name: { not: 'KASIR' } } };
     } else if (!TOP_MANAGEMENT.includes(actor.role)) {

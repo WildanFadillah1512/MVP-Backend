@@ -181,10 +181,22 @@ export const createReport = async (req: Request, res: Response) => {
 export const getMyReports = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
+    const { startDate, endDate } = req.query;
+
+    let dateFilter = {};
+    if (startDate && endDate) {
+      dateFilter = {
+        date: {
+          gte: new Date(startDate as string),
+          lte: new Date(endDate as string)
+        }
+      };
+    }
+
     const reports = await prisma.dailyReport.findMany({
-      where: { userId },
+      where: { userId, ...dateFilter },
       orderBy: { date: 'desc' },
-      take: 30,
+      take: (startDate && endDate) ? undefined : 30,
     });
 
     return successResponse(res, reports, 'Data laporan berhasil diambil');
@@ -196,7 +208,15 @@ export const getMyReports = async (req: Request, res: Response) => {
 export const getLockedReports = async (req: Request, res: Response) => {
   try {
     const actor = (req as any).user;
+    const { startDate, endDate } = req.query;
     const where: any = { status: ReportStatus.LOCKED };
+
+    if (startDate && endDate) {
+      where.date = {
+        gte: new Date(startDate as string),
+        lte: new Date(endDate as string)
+      };
+    }
 
     if (!TOP_MANAGEMENT.includes(actor.role) && actor.role !== 'GM') {
       const subordinateIds = await getSubordinateIds(actor.id);
@@ -283,3 +303,35 @@ export const unlockReport = async (req: Request, res: Response) => {
     return errorResponse(res, 'Gagal membuka laporan', null, 500);
   }
 };
+
+export const getDailyReportTemplate = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    
+    // Get all pending tasks assigned by CEO/OWNER to this user
+    const ceoTasks = await prisma.task.findMany({
+      where: {
+        assignedTo: userId,
+        status: { in: ['TODO', 'IN_PROGRESS'] },
+        assigner: {
+          role: {
+            name: { in: ['CEO', 'OWNER'] }
+          }
+        },
+        isArchived: false
+      },
+      include: {
+        assigner: {
+          select: { name: true, role: { select: { name: true } } }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    return successResponse(res, ceoTasks, 'Template laporan harian berhasil diambil');
+  } catch (error) {
+    console.error('Get daily report template error:', error);
+    return errorResponse(res, 'Gagal mengambil template laporan', null, 500);
+  }
+};
+

@@ -61,20 +61,30 @@ export const createLeaveRequest = async (req: Request, res: Response) => {
         await writeAuditLog(req, 'CREATE', 'LEAVE', 'Pengajuan cuti dibuat');
     return successResponse(res, request, 'Pengajuan cuti berhasil dibuat. Menunggu persetujuan atasan.');
   } catch (error) {
-    return errorResponse(res, 'Terjadi kesalahan saat mengajukan cuti', null, 500);
-  }
+    return errorResponse(res, 'Terjadi kesalahan saat mengajukan cuti', null, 500);  }
 };
 
 export const getMyLeaves = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
+    const { startDate, endDate } = req.query;
     
+    let filter: any = { userId };
+    if (startDate && endDate) {
+      const end = new Date(endDate as string);
+      end.setHours(23, 59, 59, 999);
+      filter.createdAt = {
+        gte: new Date(startDate as string),
+        lte: end
+      };
+    }
+
     const balance = await prisma.leaveBalance.findUnique({
       where: { userId }
     });
 
     const requests = await prisma.leaveRequest.findMany({
-      where: { userId },
+      where: filter,
       include: {
         cancellationRequests: { orderBy: { createdAt: 'desc' }, take: 1 }
       },
@@ -90,7 +100,17 @@ export const getMyLeaves = async (req: Request, res: Response) => {
 export const getTeamLeaves = async (req: Request, res: Response) => {
   try {
     const actor = (req as any).user;
+    const { startDate, endDate } = req.query;
     const where: any = {};
+
+    if (startDate && endDate) {
+      const end = new Date(endDate as string);
+      end.setHours(23, 59, 59, 999);
+      where.createdAt = {
+        gte: new Date(startDate as string),
+        lte: end
+      };
+    }
 
     if (TOP_MANAGEMENT.includes(actor.role)) {
       // CEO/Owner/Admin can review all.

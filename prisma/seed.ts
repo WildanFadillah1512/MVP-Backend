@@ -1,4 +1,4 @@
-﻿import { PrismaClient, RoleName } from '@prisma/client';
+import { PrismaClient, RoleName } from '@prisma/client';
 import bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -28,7 +28,7 @@ async function main() {
   }
 
   // 2. Create Divisions
-  const divisions = ['PRODUKSI', 'PURCHASING', 'KASIR', 'GUDANG', 'NONE'];
+  const divisions = ['PRODUKSI', 'PURCHASING', 'KASIR', 'GUDANG', 'PIC KEBERSIHAN DAN PERALATAN', 'PIC PRODUK DAN PERALATAN', 'NONE'];
 
   const divisionRecords: Record<string, { id: string }> = {};
   for (const divisionName of divisions) {
@@ -175,6 +175,35 @@ async function main() {
     },
   });
 
+  const picKebersihan = await prisma.user.upsert({
+    where: { email: 'pic.kebersihan@company.com' },
+    update: {},
+    create: {
+      email: 'pic.kebersihan@company.com',
+      password,
+      name: 'PIC Kebersihan dan Peralatan',
+      roleId: roleRecords[RoleName.STAFF].id,
+      divisionId: divisionRecords['PIC KEBERSIHAN DAN PERALATAN'].id,
+      supervisorId: leaderProduksi.id,
+      leaveBalances: { create: { totalQuota: 12, usedQuota: 0 } }
+    },
+  });
+
+  const picProduk = await prisma.user.upsert({
+    where: { email: 'pic.produk@company.com' },
+    update: {},
+    create: {
+      email: 'pic.produk@company.com',
+      password,
+      name: 'PIC Produk dan Peralatan',
+      roleId: roleRecords[RoleName.STAFF].id,
+      divisionId: divisionRecords['PIC PRODUK DAN PERALATAN'].id,
+      supervisorId: leaderProduksi.id,
+      leaveBalances: { create: { totalQuota: 12, usedQuota: 0 } }
+    },
+  });
+
+
   // Create Staff Purchasing
   const staffPurchasing = await prisma.user.upsert({
     where: { email: 'staff.purchasing@company.com' },
@@ -200,7 +229,7 @@ async function main() {
       name: 'Staff Gudang',
       roleId: roleRecords[RoleName.STAFF].id,
       divisionId: divisionRecords.GUDANG.id,
-      supervisorId: gm.id,
+      supervisorId: staffPurchasing.id,
       leaveBalances: { create: { totalQuota: 12, usedQuota: 0 } }
     }
   });
@@ -284,8 +313,8 @@ async function main() {
   // 7. Seed Chat Groups - ONLY CREATE EMPTY GROUPS, NO MESSAGES
   console.log('Seeding chat groups...');
   const chatGroups = [
-    { name: 'Umum - All Divisions', description: 'Grup umum untuk semua divisi', members: [owner.id, ceo.id, gm.id, admin.id, managerProduksi.id, leaderProduksi.id, staffProduksi.id, staffPurchasing.id, staffGudang.id, staffKasir.id] },
-    { name: 'Divisi Produksi', description: 'Diskusi khusus operasional produksi', members: [gm.id, managerProduksi.id, leaderProduksi.id, staffProduksi.id] },
+    { name: 'Umum - All Divisions', description: 'Grup umum untuk semua divisi', members: [owner.id, ceo.id, gm.id, admin.id, managerProduksi.id, leaderProduksi.id, staffProduksi.id, picKebersihan.id, picProduk.id, staffPurchasing.id, staffGudang.id, staffKasir.id] },
+    { name: 'Divisi Produksi', description: 'Diskusi khusus operasional produksi', members: [gm.id, managerProduksi.id, leaderProduksi.id, staffProduksi.id, picKebersihan.id, picProduk.id] },
     { name: 'Divisi Purchasing', description: 'Diskusi kebutuhan belanja dan supplier', members: [gm.id, managerProduksi.id, staffPurchasing.id] },
     { name: 'Divisi Gudang', description: 'Diskusi manajemen stok dan inventory', members: [gm.id, managerProduksi.id, staffGudang.id] },
     { name: 'Divisi Kasir', description: 'Diskusi laporan pendapatan dan cabang', members: [gm.id, staffKasir.id] },

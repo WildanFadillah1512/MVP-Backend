@@ -18,7 +18,8 @@ import {
   createWarningLetter,
   getWarningLetters,
   updateWarningSettings,
-  updateUserPassword
+  updateUserPassword,
+  terminateUser
 } from '../controllers/user.controller';
 import { authenticate, authorizeRole } from '../middlewares/auth.middleware';
 
@@ -49,6 +50,7 @@ router.get('/:id', getUserById);
 router.post('/', createUser);
 router.patch('/:id/password', authorizeRole(['OWNER', 'CEO', 'ADMIN']), updateUserPassword);
 router.patch('/:id', updateUser);
+router.post('/:id/terminate', authorizeRole(['OWNER', 'CEO', 'ADMIN']), terminateUser);
 router.delete('/:id', deactivateUser);
 
 export default router;

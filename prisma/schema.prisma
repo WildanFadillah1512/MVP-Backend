@@ -7,17 +7,873 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// -----------------------------------------
-// ENUMS
-// -----------------------------------------
+model Role {
+  id        String   @id @default(uuid())
+  name      RoleName @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users     User[]
+}
+
+model Division {
+  id                String             @id @default(uuid())
+  name              String             @unique
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  targetAssignments TargetAssignment[]
+  users             User[]
+}
+
+model Shift {
+  id            String         @id @default(uuid())
+  name          String         @unique
+  startTime     String
+  endTime       String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  shiftRequests ShiftRequest[]
+  users         User[]
+}
+
+model ShiftRequest {
+  id         String   @id @default(uuid())
+  userId     String
+  shiftId    String
+  date       DateTime @db.Date
+  status     String   @default("PENDING")
+  approverId String?
+  reason     String?
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  approver   User?    @relation("ShiftApprover", fields: [approverId], references: [id])
+  shift      Shift    @relation(fields: [shiftId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model User {
+  id                        String                     @id @default(uuid())
+  email                     String                     @unique
+  password                  String
+  name                      String
+  roleId                    String
+  divisionId                String
+  isActive                  Boolean                    @default(true)
+  supervisorId              String?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  deletedAt                 DateTime?
+  bio                       String?
+  phone                     String?
+  photoUrl                  String?
+  branchId                  String?
+  shiftId                   String?
+  announcementsCreated      Announcement[]             @relation("AnnouncementCreator")
+  attendances               Attendance[]
+  auditLogs                 AuditLog[]
+  cashierReportsCreated     CashierReport[]            @relation("CashierReportCreator")
+  chatMemberships           ChatGroupMember[]
+  messagesSent              ChatMessage[]
+  dailyReports              DailyReport[]
+  dailyUploads              DailyUpload[]
+  leaveBalances             LeaveBalance?
+  leaveCancellationReviews  LeaveCancellationRequest[] @relation("LeaveCancellationReviewer")
+  leaveCancellationRequests LeaveCancellationRequest[] @relation("LeaveCancellationRequester")
+  leaveRequests             LeaveRequest[]
+  locationLogs              LocationLog[]
+  loginOtps                 LoginOtp[]
+  materialRequestsHandled   MaterialRequest[]          @relation("MaterialRequestHandler")
+  materialRequestsCreated   MaterialRequest[]          @relation("MaterialRequestRequester")
+  overtimeRecords           OvertimeRecord[]
+  paklaringReceived         Paklaring[]                @relation("PaklaringEmployee")
+  paklaringIssued           Paklaring[]                @relation("PaklaringIssuer")
+  payrolls                  Payroll[]
+  resignationRequests       ResignationRequest[]
+  approvedShifts            ShiftRequest[]             @relation("ShiftApprover")
+  shiftRequests             ShiftRequest[]
+  targetAssignments         TargetAssignment[]
+  branch                    Branch?                    @relation(fields: [branchId], references: [id])
+  division                  Division                   @relation(fields: [divisionId], references: [id])
+  role                      Role                       @relation(fields: [roleId], references: [id])
+  shift                     Shift?                     @relation(fields: [shiftId], references: [id])
+  supervisor                User?                      @relation("UserSupervisor", fields: [supervisorId], references: [id])
+  subordinates              User[]                     @relation("UserSupervisor")
+  warningLettersReceived    WarningLetter[]            @relation("WarningLetterEmployee")
+  warningLettersIssued      WarningLetter[]            @relation("WarningLetterIssuer")
+
+  terminationsGiven         TerminationRecord[]        @relation("TerminatedBy")
+  terminationRecord         TerminationRecord?         @relation("UserTermination")
+
+  @@index([branchId])
+}
+
+model TerminationRecord {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  terminatedById String
+  reason         String
+  terminatedAt   DateTime @default(now())
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           User     @relation("UserTermination", fields: [userId], references: [id])
+  terminatedBy   User     @relation("TerminatedBy", fields: [terminatedById], references: [id])
+  
+  @@index([userId])
+}
+
+
+model LoginOtp {
+  id            String    @id @default(uuid())
+  userId        String
+  otpHash       String
+  tempTokenHash String    @unique
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  attempts      Int       @default(0)
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime  @default(now())
+  user          User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, consumedAt])
+  @@index([expiresAt])
+}
+
+model Attendance {
+  id         String           @id @default(uuid())
+  userId     String
+  date       DateTime         @db.Date
+  checkIn    DateTime?
+  checkOut   DateTime?
+  breakStart DateTime?
+  breakEnd   DateTime?
+  status     AttendanceStatus
+  totalHours Float?           @default(0)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  user       User             @relation(fields: [userId], references: [id])
+
+  @@unique([userId, date])
+}
+
+model LeaveBalance {
+  id         String   @id @default(uuid())
+  userId     String   @unique
+  totalQuota Int      @default(12)
+  usedQuota  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model LeaveRequest {
+  id                   String                     @id @default(uuid())
+  userId               String
+  startDate            DateTime                   @db.Date
+  endDate              DateTime                   @db.Date
+  reason               String
+  status               LeaveStatus                @default(PENDING)
+  approverId           String?
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+  cancellationRequests LeaveCancellationRequest[]
+  user                 User                       @relation(fields: [userId], references: [id])
+}
+
+model LeaveCancellationRequest {
+  id             String       @id @default(uuid())
+  leaveRequestId String
+  userId         String
+  reason         String?
+  status         LeaveStatus  @default(PENDING)
+  reviewerId     String?
+  reviewedAt     DateTime?
+  notes          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  leaveRequest   LeaveRequest @relation(fields: [leaveRequestId], references: [id])
+  reviewer       User?        @relation("LeaveCancellationReviewer", fields: [reviewerId], references: [id])
+  user           User         @relation("LeaveCancellationRequester", fields: [userId], references: [id])
+
+  @@index([leaveRequestId])
+  @@index([userId, status])
+  @@index([reviewerId])
+}
+
+model DailyReport {
+  id          String            @id @default(uuid())
+  userId      String
+  date        DateTime          @db.Date
+  description String
+  output      String?
+  obstacles   String?
+  notes       String?
+  status      ReportStatus      @default(DRAFT)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  isArchived  Boolean           @default(false)
+  user        User              @relation(fields: [userId], references: [id])
+  tasks       DailyReportTask[]
+  uploads     DailyUpload[]
+
+  @@unique([userId, date])
+}
+
+model DailyReportTask {
+  id                 String      @id @default(uuid())
+  reportId           String
+  taskType           String
+  taskId             String?
+  targetAssignmentId String?
+  warehouseItemId    String?
+  productId          String?
+  quantity           Float?
+  notes              String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  report             DailyReport @relation(fields: [reportId], references: [id])
+
+  @@index([reportId])
+}
+
+model DailyUpload {
+  id           String       @id @default(uuid())
+  userId       String
+  reportId     String?
+  fileUrl      String
+  fileName     String
+  fileType     String
+  status       LeaveStatus  @default(PENDING)
+  reviewerId   String?
+  rejectReason String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  report       DailyReport? @relation(fields: [reportId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+}
+
+model WorkTarget {
+  id          String             @id @default(uuid())
+  title       String
+  description String?
+  period      TargetPeriod
+  targetValue Float
+  unit        String
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  assignments TargetAssignment[]
+}
+
+model TargetAssignment {
+  id           String     @id @default(uuid())
+  targetId     String
+  userId       String?
+  assignedById String
+  currentValue Float      @default(0)
+  isCompleted  Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  divisionId   String?
+  division     Division?  @relation(fields: [divisionId], references: [id])
+  target       WorkTarget @relation(fields: [targetId], references: [id])
+  user         User?      @relation(fields: [userId], references: [id])
+}
+
+model Product {
+  id                String                 @id @default(uuid())
+  code              String                 @unique
+  name              String
+  category          String
+  basePrice         Float                  @default(0)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  recipeOutputQty   Int                    @default(1)
+  recipes           ErpProductRecipe[]
+  stockMovements    ProductStockMovement[]
+  productionRecords ProductionRecord[]
+  productionRejects ProductionReject[]
+  productionTargets ProductionTarget[]
+}
+
+model ProductionRecord {
+  id        String             @id @default(uuid())
+  productId String
+  date      DateTime           @db.Date
+  quantity  Int
+  notes     String?
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  rejectQty Int                @default(0)
+  product   Product            @relation(fields: [productId], references: [id])
+  rejects   ProductionReject[]
+}
+
+model ProductStockMovement {
+  id        String            @id @default(uuid())
+  productId String
+  type      StockMovementType
+  quantity  Int
+  reference String?
+  notes     String?
+  createdAt DateTime          @default(now())
+  product   Product           @relation(fields: [productId], references: [id])
+}
+
+model ProductionTarget {
+  id          String   @id @default(uuid())
+  productId   String
+  targetMonth DateTime @db.Date
+  targetQty   Int
+  actualQty   Int      @default(0)
+  createdById String
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  product     Product  @relation(fields: [productId], references: [id])
+
+  @@unique([productId, targetMonth])
+  @@index([targetMonth])
+  @@index([createdById])
+}
+
+model Supplier {
+  id                   String                @id @default(uuid())
+  code                 String                @unique
+  name                 String
+  contactName          String?
+  phone                String?
+  email                String?
+  address              String?
+  status               String                @default("ACTIVE")
+  createdById          String
+  approvedById         String?
+  approvedAt           DateTime?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  purchaseRequestItems PurchaseRequestItem[]
+  supplierPrices       SupplierPrice[]
+
+  @@index([status])
+}
+
+model MaterialRequest {
+  id              String        @id @default(uuid())
+  requestedById   String
+  handledById     String?
+  warehouseItemId String
+  quantity        Float
+  purpose         String
+  status          String        @default("PENDING")
+  notes           String?
+  handledAt       DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  handledBy       User?         @relation("MaterialRequestHandler", fields: [handledById], references: [id])
+  requestedBy     User          @relation("MaterialRequestRequester", fields: [requestedById], references: [id])
+  item            WarehouseItem @relation(fields: [warehouseItemId], references: [id])
+
+  @@index([status])
+  @@index([warehouseItemId])
+  @@index([requestedById])
+}
+
+model SupplierPrice {
+  id              String        @id @default(uuid())
+  supplierId      String
+  warehouseItemId String
+  unitPrice       Float
+  isActive        Boolean       @default(true)
+  setCeoId        String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  supplier        Supplier      @relation(fields: [supplierId], references: [id])
+  item            WarehouseItem @relation(fields: [warehouseItemId], references: [id])
+
+  @@unique([supplierId, warehouseItemId])
+  @@index([warehouseItemId])
+}
+
+model PurchaseRequestItem {
+  id                String          @id @default(uuid())
+  purchaseRequestId String
+  warehouseItemId   String
+  requestedQty      Float
+  estimatedBudget   Float?
+  actualPrice       Float?
+  actualQty         Float?
+  supplierId        String?
+  purchaseRequest   PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  supplier          Supplier?       @relation(fields: [supplierId], references: [id])
+  item              WarehouseItem   @relation(fields: [warehouseItemId], references: [id])
+
+  @@index([purchaseRequestId])
+  @@index([warehouseItemId])
+}
+
+model PurchaseRequest {
+  id                String                @id @default(uuid())
+  requestNumber     String                @unique
+  status            PurchaseStatus        @default(DRAFT)
+  priority          String                @default("MEDIUM")
+  requestedById     String
+  staffId           String?
+  managerId         String?
+  ceoId             String?
+  submittedAt       DateTime?
+  staffProcessedAt  DateTime?
+  managerApprovedAt DateTime?
+  ceoApprovedAt     DateTime?
+  purchasedAt       DateTime?
+  notes             String?
+  rejectReason      String?
+  receiptUrl        String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  items             PurchaseRequestItem[]
+
+  @@index([status])
+  @@index([requestedById])
+}
+
+model ShoppingNeed {
+  id        String   @id @default(uuid())
+  itemName  String
+  quantity  Int
+  priority  String
+  status    String
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PurchaseNote {
+  id         String   @id @default(uuid())
+  itemName   String
+  quantity   Int
+  unitPrice  Float
+  totalPrice Float
+  supplier   String?
+  receiptUrl String?
+  date       DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Branch {
+  id             String          @id @default(uuid())
+  code           String          @unique
+  name           String
+  address        String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  cashierReports CashierReport[]
+  users          User[]
+}
+
+model ResignationRequest {
+  id             String    @id @default(uuid())
+  userId         String
+  reason         String
+  effectiveDate  DateTime  @db.Date
+  status         String    @default("SUBMITTED")
+  backupSnapshot String?
+  reviewedById   String?
+  reviewedAt     DateTime?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  user           User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+model WarningLetter {
+  id         String   @id @default(uuid())
+  employeeId String
+  issuedById String
+  type       String   @default("SP")
+  reason     String
+  issuedAt   DateTime @default(now())
+  expiresAt  DateTime
+  status     String   @default("ACTIVE")
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  employee   User     @relation("WarningLetterEmployee", fields: [employeeId], references: [id])
+  issuedBy   User     @relation("WarningLetterIssuer", fields: [issuedById], references: [id])
+
+  @@index([employeeId, status])
+  @@index([expiresAt])
+}
+
+model CashierReport {
+  id              String   @id @default(uuid())
+  branchId        String
+  date            DateTime @db.Date
+  totalCash       Float    @default(0)
+  totalTransfer   Float    @default(0)
+  totalQris       Float    @default(0)
+  totalExpense    Float    @default(0)
+  netTotal        Float    @default(0)
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  depositProofUrl String?
+  createdById     String?
+  branch          Branch   @relation(fields: [branchId], references: [id])
+  createdBy       User?    @relation("CashierReportCreator", fields: [createdById], references: [id])
+
+  @@index([createdById])
+}
+
+model Announcement {
+  id          String    @id @default(uuid())
+  title       String
+  message     String
+  fileUrl     String?
+  fileName    String?
+  isPopup     Boolean   @default(true)
+  isActive    Boolean   @default(true)
+  createdById String
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  createdBy   User      @relation("AnnouncementCreator", fields: [createdById], references: [id])
+
+  @@index([isActive, createdAt])
+  @@index([createdById])
+}
+
+model WarehouseItem {
+  id                   String                @id @default(uuid())
+  code                 String                @unique
+  name                 String
+  category             String
+  minStock             Float                 @default(10)
+  currentStock         Float                 @default(0)
+  unit                 String
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  isActive             Boolean               @default(true)
+  purchasePrice        Float                 @default(0)
+  purchaseGram         Float                 @default(0)
+  pricePerGram         Float                 @default(0)
+  maxStock             Float?
+  recipes              ErpProductRecipe[]
+  materialRequests     MaterialRequest[]
+  purchaseRequestItems PurchaseRequestItem[]
+  supplierPrices       SupplierPrice[]
+  movements            WarehouseMovement[]
+}
+
+model WarehouseMovement {
+  id              String            @id @default(uuid())
+  warehouseItemId String
+  type            StockMovementType
+  quantity        Float
+  notes           String?
+  date            DateTime          @default(now())
+  createdAt       DateTime          @default(now())
+  item            WarehouseItem     @relation(fields: [warehouseItemId], references: [id])
+}
+
+model ChatGroup {
+  id          String            @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime          @default(now())
+  members     ChatGroupMember[]
+  messages    ChatMessage[]
+}
+
+model ChatGroupMember {
+  id       String    @id @default(uuid())
+  groupId  String
+  userId   String
+  joinedAt DateTime  @default(now())
+  group    ChatGroup @relation(fields: [groupId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+
+  @@unique([groupId, userId])
+}
+
+model ChatMessage {
+  id        String    @id @default(uuid())
+  groupId   String
+  senderId  String
+  content   String
+  fileUrl   String?
+  createdAt DateTime  @default(now())
+  fileName  String?
+  fileSize  Int?
+  fileType  String?
+  group     ChatGroup @relation(fields: [groupId], references: [id])
+  sender    User      @relation(fields: [senderId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  type      String
+  createdAt DateTime @default(now())
+  link      String?
+  metadata  String?
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String
+  action      String
+  module      String
+  description String
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([module])
+}
+
+model SystemSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Holiday {
+  id            String   @id @default(uuid())
+  date          DateTime @unique @db.Date
+  name          String
+  description   String?
+  workStartTime String?
+  workEndTime   String?
+  createdAt     DateTime @default(now())
+
+  @@index([date])
+}
+
+model ErpConfig {
+  id         String   @id @default(uuid())
+  moduleName String   @unique
+  isLocked   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+}
+
+model ErpCustomer {
+  id          String   @id @default(uuid())
+  name        String
+  phone       String?
+  email       String?
+  totalPoints Int      @default(0)
+  createdAt   DateTime @default(now())
+}
+
+model ErpProductRecipe {
+  id              String        @id @default(uuid())
+  productId       String
+  warehouseItemId String
+  qtyNeeded       Float
+  createdAt       DateTime      @default(now())
+  unitPrice       Float         @default(0)
+  product         Product       @relation(fields: [productId], references: [id])
+  ingredient      WarehouseItem @relation(fields: [warehouseItemId], references: [id])
+
+  @@unique([productId, warehouseItemId])
+}
+
+model ErpFinanceLedger {
+  id          String   @id @default(uuid())
+  date        DateTime @db.Date
+  description String
+  type        String
+  amount      Float
+  createdAt   DateTime @default(now())
+}
+
+model OvertimeRecord {
+  id         String   @id @default(uuid())
+  userId     String
+  date       DateTime @db.Date
+  startTime  DateTime
+  endTime    DateTime
+  totalHours Float
+  reason     String
+  status     String   @default("PENDING")
+  approverId String?
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, date])
+  @@index([status])
+}
+
+model Paklaring {
+  id           String   @id @default(uuid())
+  employeeId   String
+  issuedById   String
+  position     String
+  startDate    DateTime @db.Date
+  endDate      DateTime @db.Date
+  department   String
+  performance  String?
+  notes        String?
+  letterNumber String   @unique
+  pdfUrl       String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  employee     User     @relation("PaklaringEmployee", fields: [employeeId], references: [id])
+  issuedBy     User     @relation("PaklaringIssuer", fields: [issuedById], references: [id])
+
+  @@index([employeeId])
+  @@index([issuedById])
+}
+
+model ProductionReject {
+  id           String           @id @default(uuid())
+  productionId String
+  productId    String
+  rejectQty    Int
+  rejectReason String
+  date         DateTime         @db.Date
+  notes        String?
+  createdAt    DateTime         @default(now())
+  product      Product          @relation(fields: [productId], references: [id])
+  production   ProductionRecord @relation(fields: [productionId], references: [id])
+
+  @@index([productionId])
+  @@index([productId, date])
+}
+
+model PurchaseRecommendation {
+  id                String   @id @default(uuid())
+  itemName          String
+  currentStock      Int
+  minStock          Int
+  recommendedQty    Int
+  priority          String
+  reason            String
+  estimatedCost     Float?
+  suggestedSupplier String?
+  status            String   @default("PENDING")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([status])
+  @@index([priority])
+}
+
+model Task {
+  id           String       @id @default(uuid())
+  title        String
+  description  String?
+  assignedTo   String
+  assignedBy   String
+  status       TaskStatus   @default(TODO)
+  priority     TaskPriority @default(MEDIUM)
+  dueDate      DateTime?
+  completedAt  DateTime?
+  attachments  String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  scheduleType String       @default("ONE_TIME")
+  scheduleDate DateTime?    @db.Date
+  isArchived   Boolean      @default(false)
+
+  @@index([assignedTo, status])
+  @@index([assignedBy])
+  @@index([scheduleType, scheduleDate])
+  @@index([dueDate])
+}
+
+model PerformanceMetric {
+  id              String   @id @default(uuid())
+  userId          String
+  month           DateTime @db.Date
+  attendanceScore Float    @default(0)
+  reportScore     Float    @default(0)
+  targetScore     Float    @default(0)
+  overtimeHours   Float    @default(0)
+  kpiScore        Float    @default(0)
+  grade           String   @default("C")
+  totalTasks      Int      @default(0)
+  completedTasks  Int      @default(0)
+  lateSubmissions Int      @default(0)
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, month])
+  @@index([month])
+  @@index([kpiScore])
+}
+
+model LocationLog {
+  id        String   @id @default(uuid())
+  userId    String
+  latitude  Float
+  longitude Float
+  address   String?
+  activity  String
+  notes     String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+model Payroll {
+  id             String        @id @default(uuid())
+  userId         String
+  period         DateTime      @db.Date
+  basicSalary    Float         @default(0)
+  allowances     Float         @default(0)
+  overtimePay    Float         @default(0)
+  bonus          Float         @default(0)
+  deductions     Float         @default(0)
+  totalSalary    Float         @default(0)
+  workDays       Int           @default(0)
+  attendanceDays Int           @default(0)
+  leaveDays      Int           @default(0)
+  overtimeHours  Float         @default(0)
+  status         PayrollStatus @default(DRAFT)
+  approvedById   String?
+  approvedAt     DateTime?
+  paidAt         DateTime?
+  notes          String?
+  pdfUrl         String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  user           User          @relation(fields: [userId], references: [id])
+
+  @@unique([userId, period])
+  @@index([userId])
+  @@index([period])
+  @@index([status])
+}
+
 enum RoleName {
-  OWNER
   CEO
-  GM
   ADMIN
   MANAGER
   LEADER
   STAFF
+  OWNER
+  GM
 }
 
 enum AttendanceStatus {
@@ -54,383 +910,6 @@ enum StockMovementType {
   ADJUSTMENT
 }
 
-// -----------------------------------------
-// CORE USER & AUTH MODELS
-// -----------------------------------------
-
-model Role {
-  id        String   @id @default(uuid())
-  name      RoleName @unique
-  users     User[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Division {
-  id                String       @id @default(uuid())
-  name              String       @unique
-  users             User[]
-  targetAssignments TargetAssignment[]
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
-}
-
-model Shift {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  startTime String   // e.g., "08:00"
-  endTime   String   // e.g., "17:00"
-  users     User[]
-  shiftRequests ShiftRequest[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model ShiftRequest {
-  id           String      @id @default(uuid())
-  userId       String
-  user         User        @relation(fields: [userId], references: [id])
-  shiftId      String
-  shift        Shift       @relation(fields: [shiftId], references: [id])
-  date         DateTime    @db.Date
-  status       String      @default("PENDING") // PENDING, APPROVED, REJECTED
-  approverId   String?
-  approver     User?       @relation("ShiftApprover", fields: [approverId], references: [id])
-  reason       String?
-  notes        String?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-}
-
-model User {
-  id         String  @id @default(uuid())
-  email      String  @unique
-  password   String
-  name       String
-  roleId     String
-  divisionId String
-  branchId   String?
-  shiftId    String?
-  isActive   Boolean @default(true)
-
-  // New fields for profile
-  photoUrl String? // Profile photo
-  bio      String? // Bio/description
-  phone    String? // Phone number
-
-  role     Role     @relation(fields: [roleId], references: [id])
-  division Division @relation(fields: [divisionId], references: [id])
-  branch   Branch?  @relation(fields: [branchId], references: [id])
-  shift    Shift?   @relation(fields: [shiftId], references: [id])
-
-  // Hierarchy
-  supervisorId String?
-  supervisor   User?   @relation("UserSupervisor", fields: [supervisorId], references: [id])
-  subordinates User[]  @relation("UserSupervisor")
-
-  // Employee Modules
-  attendances       Attendance[]
-  leaveBalances     LeaveBalance?
-  leaveRequests     LeaveRequest[]
-  leaveCancellationRequests LeaveCancellationRequest[] @relation("LeaveCancellationRequester")
-  leaveCancellationReviews  LeaveCancellationRequest[] @relation("LeaveCancellationReviewer")
-  dailyReports      DailyReport[]
-  dailyUploads      DailyUpload[]
-  targetAssignments TargetAssignment[]
-  overtimeRecords   OvertimeRecord[]
-
-  // Chat
-  chatMemberships ChatGroupMember[]
-  messagesSent    ChatMessage[]
-
-  // Audits
-  auditLogs AuditLog[]
-  loginOtps LoginOtp[]
-
-  // Location
-  locationLogs LocationLog[]
-
-  // Paklaring (Work Certificate)
-  paklaringIssued   Paklaring[] @relation("PaklaringIssuer")
-  paklaringReceived Paklaring[] @relation("PaklaringEmployee")
-  payrolls          Payroll[]
-  resignationRequests ResignationRequest[]
-  cashierReportsCreated CashierReport[] @relation("CashierReportCreator")
-  announcementsCreated Announcement[] @relation("AnnouncementCreator")
-  warningLettersReceived WarningLetter[] @relation("WarningLetterEmployee")
-  warningLettersIssued WarningLetter[] @relation("WarningLetterIssuer")
-  materialRequestsCreated MaterialRequest[] @relation("MaterialRequestRequester")
-  materialRequestsHandled MaterialRequest[] @relation("MaterialRequestHandler")
-
-  shiftRequests   ShiftRequest[]
-  approvedShifts  ShiftRequest[] @relation("ShiftApprover")
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  @@index([branchId])
-}
-
-model LoginOtp {
-  id            String    @id @default(uuid())
-  userId        String
-  user          User      @relation(fields: [userId], references: [id])
-  otpHash       String
-  tempTokenHash String    @unique
-  expiresAt     DateTime
-  consumedAt    DateTime?
-  attempts      Int       @default(0)
-  ipAddress     String?
-  userAgent     String?
-
-  createdAt DateTime @default(now())
-
-  @@index([userId, consumedAt])
-  @@index([expiresAt])
-}
-
-// -----------------------------------------
-// EMPLOYEES: ATTENDANCE & LEAVE
-// -----------------------------------------
-
-model Attendance {
-  id         String           @id @default(uuid())
-  userId     String
-  user       User             @relation(fields: [userId], references: [id])
-  date       DateTime         @db.Date
-  checkIn    DateTime?
-  checkOut   DateTime?
-  status     AttendanceStatus
-  totalHours Float?           @default(0)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([userId, date])
-}
-
-model LeaveBalance {
-  id         String @id @default(uuid())
-  userId     String @unique
-  user       User   @relation(fields: [userId], references: [id])
-  totalQuota Int    @default(12)
-  usedQuota  Int    @default(0)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model LeaveRequest {
-  id         String      @id @default(uuid())
-  userId     String
-  user       User        @relation(fields: [userId], references: [id])
-  startDate  DateTime    @db.Date
-  endDate    DateTime    @db.Date
-  reason     String
-  status     LeaveStatus @default(PENDING)
-  approverId String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  cancellationRequests LeaveCancellationRequest[]
-}
-
-model LeaveCancellationRequest {
-  id             String       @id @default(uuid())
-  leaveRequestId String
-  leaveRequest   LeaveRequest @relation(fields: [leaveRequestId], references: [id])
-  userId         String
-  user           User         @relation("LeaveCancellationRequester", fields: [userId], references: [id])
-  reason         String?
-  status         LeaveStatus  @default(PENDING)
-  reviewerId     String?
-  reviewer       User?        @relation("LeaveCancellationReviewer", fields: [reviewerId], references: [id])
-  reviewedAt     DateTime?
-  notes          String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([leaveRequestId])
-  @@index([userId, status])
-  @@index([reviewerId])
-}
-
-// -----------------------------------------
-// EMPLOYEES: REPORTS & KPI
-// -----------------------------------------
-
-model DailyReport {
-  id          String       @id @default(uuid())
-  userId      String
-  user        User         @relation(fields: [userId], references: [id])
-  date        DateTime     @db.Date
-  description String
-  output      String?
-  obstacles   String?
-  notes       String?
-  status      ReportStatus @default(DRAFT)
-  isArchived  Boolean      @default(false)
-
-  uploads DailyUpload[]
-  tasks   DailyReportTask[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([userId, date])
-}
-
-model DailyReportTask {
-  id                 String       @id @default(uuid())
-  reportId           String
-  report             DailyReport  @relation(fields: [reportId], references: [id])
-  
-  // What kind of task/job is this?
-  taskType           String       // "TASK", "TARGET", "STOCK_OUT", "PRODUCTION"
-  
-  // References to specific entities (all optional, only one used based on taskType)
-  taskId             String?
-  targetAssignmentId String?
-  warehouseItemId    String?
-  productId          String?
-  
-  // For target/stock/production
-  quantity           Float?
-  
-  notes              String?
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([reportId])
-}
-
-model DailyUpload {
-  id           String       @id @default(uuid())
-  userId       String
-  user         User         @relation(fields: [userId], references: [id])
-  reportId     String?
-  report       DailyReport? @relation(fields: [reportId], references: [id])
-  fileUrl      String
-  fileName     String
-  fileType     String
-  status       LeaveStatus  @default(PENDING) // Reusing enum for simplicity (Pending/Approve/Reject)
-  reviewerId   String?
-  rejectReason String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model WorkTarget {
-  id          String       @id @default(uuid())
-  title       String
-  description String?
-  period      TargetPeriod
-  targetValue Float
-  unit        String // pcs, orders, rupiah, etc.
-
-  assignments TargetAssignment[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model TargetAssignment {
-  id           String @id @default(uuid())
-  targetId     String
-  userId       String?
-  divisionId   String?
-  assignedById String
-
-  target   WorkTarget @relation(fields: [targetId], references: [id])
-  user     User?      @relation(fields: [userId], references: [id])
-  division Division?  @relation(fields: [divisionId], references: [id])
-
-  currentValue Float   @default(0)
-  isCompleted  Boolean @default(false)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-// -----------------------------------------
-// PRODUKSI (PHASE 1) & PHASE 2 PREP
-// -----------------------------------------
-
-model Product {
-  id        String @id @default(uuid())
-  code      String @unique
-  name      String
-  category  String
-  basePrice Float  @default(0) // Phase 2 HPP Prep
-  recipeOutputQty Int @default(1) // Finished goods produced by 1 recipe batch/adonan
-
-  productionRecords ProductionRecord[]
-  productionTargets ProductionTarget[]
-  productionRejects ProductionReject[]
-  stockMovements    ProductStockMovement[]
-
-  // Phase 2 ERP: BOM Link
-  recipes ErpProductRecipe[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model ProductionRecord {
-  id        String   @id @default(uuid())
-  productId String
-  product   Product  @relation(fields: [productId], references: [id])
-  date      DateTime @db.Date
-  quantity  Int
-  rejectQty Int      @default(0)
-  notes     String?
-
-  rejects ProductionReject[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model ProductStockMovement {
-  id        String            @id @default(uuid())
-  productId String
-  product   Product           @relation(fields: [productId], references: [id])
-  type      StockMovementType
-  quantity  Int
-  reference String? // Order ID or Production ID
-  notes     String?
-
-  createdAt DateTime @default(now())
-}
-
-// Target Produksi Bulanan (NEW - PHASE 1)
-model ProductionTarget {
-  id          String   @id @default(uuid())
-  productId   String
-  product     Product  @relation(fields: [productId], references: [id])
-  targetMonth DateTime @db.Date // YYYY-MM-01
-  targetQty   Int
-  actualQty   Int      @default(0)
-  createdById String
-  notes       String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([productId, targetMonth])
-  @@index([targetMonth])
-  @@index([createdById])
-}
-
-// -----------------------------------------
-// PURCHASING (PHASE 1) - EXTENDED
-// -----------------------------------------
-
 enum PurchaseStatus {
   DRAFT
   SUBMITTED_BY_WAREHOUSE
@@ -441,532 +920,6 @@ enum PurchaseStatus {
   REJECTED
   PURCHASED
 }
-
-model Supplier {
-  id          String   @id @default(uuid())
-  code        String   @unique
-  name        String
-  contactName String?
-  phone       String?
-  email       String?
-  address     String?
-  status      String   @default("ACTIVE") // ACTIVE, INACTIVE
-  
-  // Authorization
-  createdById String
-  approvedById String?
-  approvedAt   DateTime?
-
-  supplierPrices SupplierPrice[]
-  purchaseRequestItems PurchaseRequestItem[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([status])
-}
-
-model MaterialRequest {
-  id              String        @id @default(uuid())
-  requestedById   String
-  requestedBy     User          @relation("MaterialRequestRequester", fields: [requestedById], references: [id])
-  handledById     String?
-  handledBy       User?         @relation("MaterialRequestHandler", fields: [handledById], references: [id])
-  warehouseItemId String
-  item            WarehouseItem @relation(fields: [warehouseItemId], references: [id])
-  quantity        Float
-  purpose         String
-  status          String        @default("PENDING")
-  notes           String?
-  handledAt       DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([status])
-  @@index([warehouseItemId])
-  @@index([requestedById])
-}
-
-model SupplierPrice {
-  id              String   @id @default(uuid())
-  supplierId      String
-  supplier        Supplier @relation(fields: [supplierId], references: [id])
-  warehouseItemId String
-  item            WarehouseItem @relation(fields: [warehouseItemId], references: [id])
-  unitPrice       Float
-  isActive        Boolean  @default(true)
-  
-  // Set by CEO only
-  setCeoId        String
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([supplierId, warehouseItemId])
-  @@index([warehouseItemId])
-}
-
-model PurchaseRequestItem {
-  id                String         @id @default(uuid())
-  purchaseRequestId String
-  purchaseRequest   PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
-  
-  warehouseItemId   String
-  item              WarehouseItem  @relation(fields: [warehouseItemId], references: [id])
-  
-  requestedQty      Float
-  estimatedBudget   Float?
-  actualPrice       Float?
-  actualQty         Float?
-  
-  supplierId        String?
-  supplier          Supplier?      @relation(fields: [supplierId], references: [id])
-
-  @@index([purchaseRequestId])
-  @@index([warehouseItemId])
-}
-
-model PurchaseRequest {
-  id                String         @id @default(uuid())
-  requestNumber     String         @unique
-  
-  items             PurchaseRequestItem[]
-  
-  status            PurchaseStatus @default(DRAFT)
-  priority          String         @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
-  
-  // Workflow
-  requestedById     String   // Warehouse staff
-  staffId           String?  // Purchasing staff
-  managerId         String?  // Manager approval
-  ceoId             String?  // CEO approval
-  
-  // Timestamps for workflow
-  submittedAt       DateTime?
-  staffProcessedAt  DateTime?
-  managerApprovedAt DateTime?
-  ceoApprovedAt     DateTime?
-  purchasedAt       DateTime?
-  
-  notes             String?
-  rejectReason      String?
-  receiptUrl        String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([status])
-  @@index([requestedById])
-}
-
-model ShoppingNeed {
-  id       String  @id @default(uuid())
-  itemName String
-  quantity Int
-  priority String // HIGH, MEDIUM, LOW
-  status   String // NEEDED, ORDERED, PURCHASED
-  notes    String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model PurchaseNote {
-  id         String   @id @default(uuid())
-  itemName   String
-  quantity   Int
-  unitPrice  Float
-  totalPrice Float
-  supplier   String?
-  receiptUrl String?
-  date       DateTime @default(now())
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-// -----------------------------------------
-// KASIR & CABANG (PHASE 1)
-// -----------------------------------------
-
-model Branch {
-  id      String  @id @default(uuid())
-  code    String  @unique
-  name    String
-  address String?
-
-  cashierReports CashierReport[]
-  users User[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model ResignationRequest {
-  id             String   @id @default(uuid())
-  userId         String
-  user           User     @relation(fields: [userId], references: [id])
-  reason         String
-  effectiveDate  DateTime @db.Date
-  status         String   @default("SUBMITTED")
-  backupSnapshot String?
-  reviewedById   String?
-  reviewedAt     DateTime?
-  notes          String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([userId])
-  @@index([status])
-}
-
-model WarningLetter {
-  id         String   @id @default(uuid())
-  employeeId String
-  employee   User     @relation("WarningLetterEmployee", fields: [employeeId], references: [id])
-  issuedById String
-  issuedBy   User     @relation("WarningLetterIssuer", fields: [issuedById], references: [id])
-  type       String   @default("SP")
-  reason     String
-  issuedAt   DateTime @default(now())
-  expiresAt  DateTime
-  status     String   @default("ACTIVE")
-  notes      String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([employeeId, status])
-  @@index([expiresAt])
-}
-
-model CashierReport {
-  id            String   @id @default(uuid())
-  branchId      String
-  branch        Branch   @relation(fields: [branchId], references: [id])
-  createdById   String?
-  createdBy     User?    @relation("CashierReportCreator", fields: [createdById], references: [id])
-  date          DateTime @db.Date
-  totalCash     Float    @default(0)
-  totalTransfer Float    @default(0)
-  totalQris     Float    @default(0)
-  totalExpense  Float    @default(0)
-  netTotal      Float    @default(0)
-  depositProofUrl String?
-  notes         String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([createdById])
-}
-
-model Announcement {
-  id          String   @id @default(uuid())
-  title       String
-  message     String
-  fileUrl     String?
-  fileName    String?
-  isPopup     Boolean  @default(true)
-  isActive    Boolean  @default(true)
-  createdById String
-  createdBy   User     @relation("AnnouncementCreator", fields: [createdById], references: [id])
-  expiresAt   DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([isActive, createdAt])
-  @@index([createdById])
-}
-
-// -----------------------------------------
-// GUDANG / WAREHOUSE (PHASE 1)
-// -----------------------------------------
-
-model WarehouseItem {
-  id           String @id @default(uuid())
-  code         String @unique
-  name         String
-  category     String
-  minStock     Float  @default(10)
-  maxStock     Float?
-  currentStock Float  @default(0)
-  unit         String
-  purchasePrice Float @default(0)
-  purchaseGram  Float @default(0)
-  pricePerGram  Float @default(0)
-  isActive     Boolean @default(true)
-
-  movements WarehouseMovement[]
-  recipes   ErpProductRecipe[]
-  supplierPrices SupplierPrice[]
-  purchaseRequestItems PurchaseRequestItem[]
-  materialRequests MaterialRequest[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model WarehouseMovement {
-  id              String            @id @default(uuid())
-  warehouseItemId String
-  item            WarehouseItem     @relation(fields: [warehouseItemId], references: [id])
-  type            StockMovementType
-  quantity        Float
-  notes           String?
-  date            DateTime          @default(now())
-
-  createdAt DateTime @default(now())
-}
-
-// -----------------------------------------
-// CHAT & COMMUNICATIONS (PHASE 1)
-// -----------------------------------------
-
-model ChatGroup {
-  id          String  @id @default(uuid())
-  name        String
-  description String?
-
-  members  ChatGroupMember[]
-  messages ChatMessage[]
-
-  createdAt DateTime @default(now())
-}
-
-model ChatGroupMember {
-  id      String    @id @default(uuid())
-  groupId String
-  group   ChatGroup @relation(fields: [groupId], references: [id])
-  userId  String
-  user    User      @relation(fields: [userId], references: [id])
-
-  joinedAt DateTime @default(now())
-
-  @@unique([groupId, userId])
-}
-
-model ChatMessage {
-  id       String    @id @default(uuid())
-  groupId  String
-  group    ChatGroup @relation(fields: [groupId], references: [id])
-  senderId String
-  sender   User      @relation(fields: [senderId], references: [id])
-  content  String
-  fileUrl  String?
-  fileName String?
-  fileType String?
-  fileSize Int?
-
-  createdAt DateTime @default(now())
-}
-
-// -----------------------------------------
-// AUDIT LOG & WARNINGS
-// -----------------------------------------
-
-model Notification {
-  id       String  @id @default(uuid())
-  userId   String // Target user
-  title    String
-  message  String
-  isRead   Boolean @default(false)
-  type     String // WARNING, INFO, KPI, CHAT, TARGET
-  link     String? // Link to related page
-  metadata String? // JSON string for additional data
-
-  createdAt DateTime @default(now())
-
-  @@index([userId, isRead])
-  @@index([createdAt])
-}
-
-model AuditLog {
-  id          String  @id @default(uuid())
-  userId      String
-  user        User    @relation(fields: [userId], references: [id])
-  action      String // CREATE, UPDATE, DELETE, UNLOCK
-  module      String // REPORTS, LEAVES, USERS
-  description String
-  ipAddress   String?
-
-  createdAt DateTime @default(now())
-
-  @@index([userId])
-  @@index([createdAt])
-  @@index([module])
-}
-
-// System Settings (NEW - PHASE 1)
-model SystemSetting {
-  id          String  @id @default(uuid())
-  key         String  @unique
-  value       String
-  description String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-// Holiday Calendar (NEW - PHASE 1)
-model Holiday {
-  id          String   @id @default(uuid())
-  date        DateTime @unique @db.Date
-  name        String
-  description String?
-
-  createdAt DateTime @default(now())
-
-  @@index([date])
-}
-
-// -----------------------------------------
-// PHASE 2 (ERP MODULES) - THE "REAL" LOCKED LOGIC
-// -----------------------------------------
-
-model ErpConfig {
-  id         String  @id @default(uuid())
-  moduleName String  @unique
-  isLocked   Boolean @default(true) // True = Feature is fully locked
-
-  createdAt DateTime @default(now())
-}
-
-model ErpCustomer {
-  id          String  @id @default(uuid())
-  name        String
-  phone       String?
-  email       String?
-  totalPoints Int     @default(0)
-
-  createdAt DateTime @default(now())
-}
-
-model ErpProductRecipe {
-  id              String        @id @default(uuid())
-  productId       String
-  product         Product       @relation(fields: [productId], references: [id])
-  warehouseItemId String
-  ingredient      WarehouseItem @relation(fields: [warehouseItemId], references: [id])
-  qtyNeeded       Float
-  unitPrice       Float         @default(0)
-
-  createdAt DateTime @default(now())
-
-  @@unique([productId, warehouseItemId])
-}
-
-model ErpFinanceLedger {
-  id          String   @id @default(uuid())
-  date        DateTime @db.Date
-  description String
-  type        String // DEBIT, CREDIT
-  amount      Float
-
-  createdAt DateTime @default(now())
-}
-
-// -----------------------------------------
-// OVERTIME MANAGEMENT (NEW - REQ #4)
-// -----------------------------------------
-
-model OvertimeRecord {
-  id         String   @id @default(uuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id])
-  date       DateTime @db.Date
-  startTime  DateTime
-  endTime    DateTime
-  totalHours Float
-  reason     String
-  status     String   @default("PENDING") // PENDING, APPROVED, REJECTED
-  approverId String?
-  notes      String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([userId, date])
-  @@index([status])
-}
-
-// -----------------------------------------
-// PAKLARING / WORK CERTIFICATE (NEW - REQ #12)
-// -----------------------------------------
-
-model Paklaring {
-  id         String @id @default(uuid())
-  employeeId String
-  employee   User   @relation("PaklaringEmployee", fields: [employeeId], references: [id])
-  issuedById String
-  issuedBy   User   @relation("PaklaringIssuer", fields: [issuedById], references: [id])
-
-  position     String // Jabatan saat bekerja
-  startDate    DateTime @db.Date
-  endDate      DateTime @db.Date
-  department   String // Divisi
-  performance  String? // Evaluasi performa
-  notes        String? // Catatan tambahan
-  letterNumber String   @unique // Nomor surat
-  pdfUrl       String? // Link ke PDF paklaring
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([employeeId])
-  @@index([issuedById])
-}
-
-// -----------------------------------------
-// PRODUCTION REJECT TRACKING (NEW - REQ #1)
-// -----------------------------------------
-
-model ProductionReject {
-  id           String           @id @default(uuid())
-  productionId String
-  production   ProductionRecord @relation(fields: [productionId], references: [id])
-  productId    String
-  product      Product          @relation(fields: [productId], references: [id])
-  rejectQty    Int
-  rejectReason String
-  date         DateTime         @db.Date
-  notes        String?
-
-  createdAt DateTime @default(now())
-
-  @@index([productionId])
-  @@index([productId, date])
-}
-
-// -----------------------------------------
-// PURCHASING RECOMMENDATIONS (NEW - REQ #2)
-// -----------------------------------------
-
-model PurchaseRecommendation {
-  id                String  @id @default(uuid())
-  itemName          String
-  currentStock      Int
-  minStock          Int
-  recommendedQty    Int
-  priority          String // HIGH, MEDIUM, LOW
-  reason            String
-  estimatedCost     Float?
-  suggestedSupplier String?
-  status            String  @default("PENDING") // PENDING, ORDERED, COMPLETED
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([status])
-  @@index([priority])
-}
-
-// -----------------------------------------
-// TASK MANAGEMENT (NEW - REQ #3)
-// -----------------------------------------
 
 enum TaskStatus {
   TODO
@@ -983,127 +936,9 @@ enum TaskPriority {
   URGENT
 }
 
-model Task {
-  id          String       @id @default(uuid())
-  title       String
-  description String?
-  assignedTo  String
-  assignedBy  String
-  status      TaskStatus   @default(TODO)
-  priority    TaskPriority @default(MEDIUM)
-  scheduleType String       @default("ONE_TIME") // ONE_TIME, DAILY, MONTHLY
-  scheduleDate DateTime?    @db.Date
-  dueDate     DateTime?
-  completedAt DateTime?
-  attachments String? // JSON array of file URLs
-  isArchived  Boolean      @default(false)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([assignedTo, status])
-  @@index([assignedBy])
-  @@index([scheduleType, scheduleDate])
-  @@index([dueDate])
-}
-
-// -----------------------------------------
-// EMPLOYEE PERFORMANCE STATISTICS (NEW - REQ #5)
-// -----------------------------------------
-
-model PerformanceMetric {
-  id     String   @id @default(uuid())
-  userId String
-  month  DateTime @db.Date // YYYY-MM-01
-
-  // Metrics
-  attendanceScore Float  @default(0)
-  reportScore     Float  @default(0)
-  targetScore     Float  @default(0)
-  overtimeHours   Float  @default(0)
-  kpiScore        Float  @default(0)
-  grade           String @default("C") // A, B, C, D
-
-  // Additional metrics
-  totalTasks      Int @default(0)
-  completedTasks  Int @default(0)
-  lateSubmissions Int @default(0)
-
-  notes String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([userId, month])
-  @@index([month])
-  @@index([kpiScore])
-}
-
-// -----------------------------------------
-// LOCATION TRACKING (NEW - REQ #9)
-// -----------------------------------------
-
-model LocationLog {
-  id        String  @id @default(uuid())
-  userId    String
-  latitude  Float
-  longitude Float
-  address   String?
-  activity  String // CHECK_IN, CHECK_OUT, FIELD_VISIT, etc
-  notes     String?
-
-  user      User    @relation(fields: [userId], references: [id])
-
-  createdAt DateTime @default(now())
-
-  @@index([userId, createdAt])
-  @@index([createdAt])
-}
-
-// -----------------------------------------
-// PAYROLL / SLIP GAJI
-// -----------------------------------------
-
 enum PayrollStatus {
   DRAFT
   PENDING
   APPROVED
   PAID
-}
-
-model Payroll {
-  id              String        @id @default(uuid())
-  userId          String
-  user            User          @relation(fields: [userId], references: [id])
-  period          DateTime      @db.Date // YYYY-MM-01
-  
-  // Komponen Gaji
-  basicSalary     Float         @default(0)
-  allowances      Float         @default(0) // Tunjangan
-  overtimePay     Float         @default(0)
-  bonus           Float         @default(0)
-  deductions      Float         @default(0) // Potongan
-  totalSalary     Float         @default(0)
-  
-  // Metadata
-  workDays        Int           @default(0)
-  attendanceDays  Int           @default(0)
-  leaveDays       Int           @default(0)
-  overtimeHours   Float         @default(0)
-  
-  status          PayrollStatus @default(DRAFT)
-  approvedById    String?
-  approvedAt      DateTime?
-  paidAt          DateTime?
-  
-  notes           String?
-  pdfUrl          String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([userId, period])
-  @@index([userId])
-  @@index([period])
-  @@index([status])
 }
